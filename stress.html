@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Dynasty: troop stress test</title>
+  <meta name="theme-color" content="#16120d">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body { padding: 0; overflow: hidden; touch-action: none; }
+    #st { position: fixed; inset: 0; image-rendering: pixelated; }
+    .hud { position: fixed; left: 8px; right: 8px; top: calc(8px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 6px; z-index: 2; }
+    .meter { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+    .meter div { background: rgba(22,18,13,.88); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+    .meter b { display: block; font-family: var(--serif); font-size: 20px; color: var(--gold); }
+    .meter b.bad { color: #e2553f; } .meter b.ok { color: #e0b040; }
+    .meter small { color: var(--dim); font-size: 11px; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .panel { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); background: rgba(22,18,13,.94); border: 1px solid var(--line); border-radius: 12px; padding: 10px; z-index: 2; max-height: 46vh; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+    td, th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <canvas id="st"></canvas>
+  <div class="hud">
+    <div class="meter">
+      <div><b id="fps">–</b><small>FPS</small></div>
+      <div><b id="sim">–</b><small>sim ms/frame</small></div>
+      <div><b id="draw">–</b><small>draw ms/frame</small></div>
+      <div><b id="troops">–</b><small>troops (on screen)</small></div>
+    </div>
+    <div class="row">
+      <a class="bbtn" href="./">← Game</a>
+      <button class="bbtn" data-cam="close">Close-up</button>
+      <button class="bbtn" data-cam="mid">Mid</button>
+      <button class="bbtn" data-cam="far">Whole field</button>
+      <button class="bbtn" id="pause">❚❚</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="sub">Pick a total troop count, or run the automatic test. It ramps up until the frame rate drops below 50 and records each step. Both sides charge, so the numbers include a full melee.</div>
+    <div class="row" style="margin-top:8px" id="presets"></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="auto" style="margin:0">Run the automatic test</button></div>
+    <div id="results"></div>
+  </div>
+  <script type="module" src="js/stress.js"></script>
+</body>
+</html>

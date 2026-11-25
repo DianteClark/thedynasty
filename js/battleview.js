@@ -133,7 +133,7 @@ function buildScreen() {
   mini = root.querySelector('.bmini'); mg = mini.getContext('2d');
   buildGround();
   const fit = () => { const dpr = Math.min(2, window.devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; cam.dpr = dpr; };
-  cam = spectator ? { x: FIELD.w / 2, y: FIELD.h / 2, z: Math.max(0.35, innerWidth / FIELD.w * 1.05), dpr: 1 } : { x: mySide === 0 ? 300 : FIELD.w - 300, y: FIELD.h / 2, z: 1.5, dpr: 1 };
+  cam = spectator ? { x: B.fw / 2, y: B.fh / 2, z: Math.max(0.35, innerWidth / B.fw * 1.05), dpr: 1 } : { x: mySide === 0 ? 300 : B.fw - 300, y: B.fh / 2, z: 1.5, dpr: 1 };
   fit(); window.addEventListener('resize', fit); root._fit = fit;
   if (!spectator) { const own = B.divisions.filter(d => d.side === mySide); if (own.length) { cam.x = own.reduce((a, d) => a + d.cx, 0) / own.length + (mySide === 0 ? 120 : -120); cam.y = own.reduce((a, d) => a + d.cy, 0) / own.length; } }
   bindInput();
@@ -143,13 +143,13 @@ function buildScreen() {
 }
 
 function buildGround() {
-  groundCanvas = document.createElement('canvas'); groundCanvas.width = FIELD.w; groundCanvas.height = FIELD.h;
+  groundCanvas = document.createElement('canvas'); groundCanvas.width = B.fw; groundCanvas.height = B.fh;
   const gg = groundCanvas.getContext('2d'); const tiles = images['g_' + B.terrain];
   let seed = 12345; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  for (let y = 0; y < FIELD.h; y += 16) for (let x = 0; x < FIELD.w; x += 16) { const k = r() < 0.75 ? 0 : r() < 0.5 ? 1 : 2; gg.drawImage(tiles, k * 16, 0, 16, 16, x, y, 16, 16); }
-  for (let i = 0; i < 260; i++) { const k = Math.floor(r() * 5); gg.drawImage(tiles, 48 + k * 16, 0, 16, 16, Math.floor(r() * FIELD.w), Math.floor(r() * FIELD.h), 16, 16); }
-  for (let i = 0; i < 120; i++) { const k = Math.floor(r() * 6); gg.drawImage(tiles, k * 16, 16, 16, 16, Math.floor(r() * FIELD.w), Math.floor(r() * FIELD.h), 16, 16); }
-  corpseCanvas = document.createElement('canvas'); corpseCanvas.width = FIELD.w; corpseCanvas.height = FIELD.h;
+  for (let y = 0; y < B.fh; y += 16) for (let x = 0; x < B.fw; x += 16) { const k = r() < 0.75 ? 0 : r() < 0.5 ? 1 : 2; gg.drawImage(tiles, k * 16, 0, 16, 16, x, y, 16, 16); }
+  for (let i = 0; i < 260; i++) { const k = Math.floor(r() * 5); gg.drawImage(tiles, 48 + k * 16, 0, 16, 16, Math.floor(r() * B.fw), Math.floor(r() * B.fh), 16, 16); }
+  for (let i = 0; i < 120; i++) { const k = Math.floor(r() * 6); gg.drawImage(tiles, k * 16, 16, 16, 16, Math.floor(r() * B.fw), Math.floor(r() * B.fh), 16, 16); }
+  corpseCanvas = document.createElement('canvas'); corpseCanvas.width = B.fw; corpseCanvas.height = B.fh;
 }
 
 function frame(now) {
@@ -165,8 +165,8 @@ function worldToScreen(x, y) { return { x: (x - cam.x) * cam.z + innerWidth / 2,
 function screenToWorld(x, y) { return { x: (x - innerWidth / 2) / cam.z + cam.x, y: (y - innerHeight / 2) / cam.z + cam.y }; }
 function clampCam() {
   const hw = innerWidth / 2 / cam.z, hh = innerHeight / 2 / cam.z;
-  cam.x = Math.max(Math.min(hw, FIELD.w / 2), Math.min(FIELD.w - Math.min(hw, FIELD.w / 2), cam.x));
-  cam.y = Math.max(Math.min(hh, FIELD.h / 2) - 60 / cam.z, Math.min(FIELD.h - Math.min(hh, FIELD.h / 2) + 160 / cam.z, cam.y));
+  cam.x = Math.max(Math.min(hw, B.fw / 2), Math.min(B.fw - Math.min(hw, B.fw / 2), cam.x));
+  cam.y = Math.max(Math.min(hh, B.fh / 2) - 60 / cam.z, Math.min(B.fh - Math.min(hh, B.fh / 2) + 160 / cam.z, cam.y));
 }
 
 function drawUnit(ctx, s, scale, animOverride, frameOverride) {
@@ -208,7 +208,8 @@ function draw() {
     if (div.side === mySide && div.pending) { const m = div.pending; g.strokeStyle = 'rgba(255,215,106,.6)'; g.setLineDash([4, 5]); g.lineWidth = 1.5 / cam.z; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(div.officer.x, div.officer.y); g.stroke(); g.setLineDash([]); }
   }
   // soldiers sorted by y, with team color under their feet
-  const live = B.soldiers.filter(s => (s.alive || s.dying > 0) && !s.fled);
+  const hw = innerWidth / 2 / cam.z + 24, hh = innerHeight / 2 / cam.z + 24;
+  const live = B.soldiers.filter(s => (s.alive || s.dying > 0) && !s.fled && Math.abs(s.x - cam.x) < hw && Math.abs(s.y - cam.y) < hh);
   live.sort((a, b) => a.y - b.y);
   for (const s of live) {
     g.fillStyle = s.div.routed ? '#999' : s.div.color; g.fillRect(Math.round(s.x - 4), Math.round(s.y + 1), 8, 2);
@@ -238,7 +239,7 @@ function draw() {
 }
 
 function drawMini() {
-  const W = mini.width, H = mini.height, sx = W / FIELD.w, sy = H / FIELD.h;
+  const W = mini.width, H = mini.height, sx = W / B.fw, sy = H / B.fh;
   mg.fillStyle = 'rgba(20,16,12,.85)'; mg.fillRect(0, 0, W, H);
   for (const s of B.soldiers) { if (!s.alive || s.fled || Math.random() < 0.5) continue; mg.fillStyle = s.div.routed ? '#888' : s.div.color; mg.fillRect(s.x * sx, s.y * sy, 1.5, 1.5); }
   for (const f of B.fires) if (B.t < f.end) { mg.fillStyle = 'rgba(255,120,40,.6)'; mg.beginPath(); mg.arc(f.x * sx, f.y * sy, f.r * sx, 0, 7); mg.fill(); }
@@ -310,7 +311,7 @@ function bindInput() {
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('wheel', e => { e.preventDefault(); cam.z = Math.max(0.35, Math.min(4, cam.z * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
-  mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * FIELD.w; cam.y = (e.clientY - r.top) / r.height * FIELD.h; });
+  mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * B.fw; cam.y = (e.clientY - r.top) / r.height * B.fh; });
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-b]'); if (!t) return;
     const b = t.dataset.b;
@@ -321,7 +322,7 @@ function bindInput() {
     if (b === 'again') { exitBattle(); return startBattle(); }
     if (b === 'speed') { root.querySelectorAll('[data-b=speed]').forEach(x => x.classList.toggle('on', x === t)); if (t.dataset.v === 'pause') paused = true; else { paused = false; speed = +t.dataset.v; } }
     if (b === 'fire' && !B.sides[mySide].fireUsed) { targeting = !targeting; }
-    if (b === 'zoom') { const far = Math.max(0.35, innerWidth / FIELD.w * 1.05); if (cam.z > far + 0.1) { cam.z = far; cam.x = FIELD.w / 2; cam.y = FIELD.h / 2; } else cam.z = 1.5; }
+    if (b === 'zoom') { const far = Math.max(0.35, innerWidth / B.fw * 1.05); if (cam.z > far + 0.1) { cam.z = far; cam.x = B.fw / 2; cam.y = B.fh / 2; } else cam.z = 1.5; }
     if (b === 'sel') { const d = B.divisions[+t.dataset.id]; openOrders(d); const c = d.c || B.centroid(d); cam.x = c.x; cam.y = c.y; }
     if (b === 'closeorders') { sel = null; root.querySelector('#border').hidden = true; }
     if (b === 'order' && sel) { B.issue(sel, t.dataset.o); openOrders(sel); toasts.push({ text: `Messenger rides to ${sel.officer.name}: ${ORDERS[t.dataset.o]}`, cls: 'strat', at: performance.now() }); }

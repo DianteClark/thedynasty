@@ -26,17 +26,18 @@ export class Battle {
    *        divisions: [ { faction?, unit: index, count, level, officer: {name, stats:{lea,mig,int,cha}, ref} } ] } x2 ] }
    */
   constructor(cfg) {
+    this.fw = (cfg.field && cfg.field.w) || FIELD.w; this.fh = (cfg.field && cfg.field.h) || FIELD.h;
     this.rand = mulberry(cfg.seed || 1);
     this.terrain = cfg.terrain || 'plains';
     this.t = 0; this.steps = 0; this.over = false; this.winner = null; this.events = [];
     this.script = (cfg.script || []).slice(); this.recorded = [];
     this.soldiers = []; this.divisions = []; this.projectiles = []; this.messengers = []; this.fires = []; this.corpses = [];
-    this.cell = 32; this.gw = Math.ceil(FIELD.w / this.cell); this.gh = Math.ceil(FIELD.h / this.cell);
+    this.cell = 32; this.gw = Math.ceil(this.fw / this.cell); this.gh = Math.ceil(this.fh / this.cell);
     this.season = cfg.season || 'Summer';
-    this.sides = cfg.sides.map((s, i) => ({ ...s, index: i, dir: i === 0 ? 1 : -1, fireUsed: s.canFire === false, hq: { x: i === 0 ? 40 : FIELD.w - 40, y: FIELD.h / 2 } }));
+    this.sides = cfg.sides.map((s, i) => ({ ...s, index: i, dir: i === 0 ? 1 : -1, fireUsed: s.canFire === false, hq: { x: i === 0 ? 40 : this.fw - 40, y: this.fh / 2 } }));
     this.trees = [];
     const nTrees = { forest: 70, plains: 8, swamp: 22, wasteland: 6, tundra: 14, mountain: 18 }[this.terrain] || 8;
-    for (let i = 0; i < nTrees; i++) this.trees.push({ x: 260 + this.r() * (FIELD.w - 520), y: 60 + this.r() * (FIELD.h - 120), alt: this.r() < 0.35 });
+    for (let i = 0; i < nTrees; i++) this.trees.push({ x: 260 + this.r() * (this.fw - 520), y: 60 + this.r() * (this.fh - 120), alt: this.r() < 0.35 });
     const total = cfg.sides.reduce((a, sd) => a + sd.divisions.reduce((x, d) => x + d.count, 0), 0);
     this.inset = total < 250 ? 360 : 0; // small fights start closer together
     for (const side of this.sides) {
@@ -50,8 +51,9 @@ export class Battle {
         const lvl = 1 + 0.06 * ((d.level || 1) - 1);
         const mods = side.mods || {};
         const mult = (1 + 0.22 * tier) * lvl;
-        const y = FIELD.h * (k + 1) / (n + 1);
-        const x = side.index === 0 ? 260 + this.inset + (role === 'ranged' || role === 'magic' ? -60 : 0) : FIELD.w - 260 - this.inset - (role === 'ranged' || role === 'magic' ? -60 : 0);
+        const y = this.fh * (k + 1) / (n + 1);
+        const back = role === 'ranged' || role === 'magic' ? 60 : 0;
+        const x = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
         const div = {
           id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
           stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
@@ -113,7 +115,7 @@ export class Battle {
   applyOrder(div, order) {
     div.state = order; div.flankPhase = 0; div.pending = null;
     if (order === 'charge') div.chargeT = this.t;
-    if (order === 'flankL' || order === 'flankR') { const sign = order === 'flankL' ? -1 : 1; const c = this.centroid(div); div.flankPt = { x: c.x + div.facing * 160, y: Math.max(60, Math.min(FIELD.h - 60, c.y + sign * 300 * (div.side === 0 ? 1 : -1))) }; }
+    if (order === 'flankL' || order === 'flankR') { const sign = order === 'flankL' ? -1 : 1; const c = this.centroid(div); div.flankPt = { x: c.x + div.facing * 160, y: Math.max(60, Math.min(this.fh - 60, c.y + sign * 300 * (div.side === 0 ? 1 : -1))) }; }
   }
   takeover(sideIdx, style = 'balanced') { if (this.sides[sideIdx].ai) return; this.recorded.push({ step: this.steps, type: 'ai', side: sideIdx, style }); this.sides[sideIdx].ai = style; }
   fireAttack(sideIdx, x, y, scripted = false) {
@@ -154,20 +156,29 @@ export class Battle {
   }
 
   buildGrid() {
-    const g = this.grid = new Array(this.gw * this.gh);
+    if (!this.grid) this.grid = Array.from({ length: this.gw * this.gh }, () => []);
+    const g = this.grid; for (let i = 0; i < g.length; i++) g[i].length = 0;
     for (const s of this.soldiers) {
       if (!s.alive || s.fled) continue;
       const gx = Math.max(0, Math.min(this.gw - 1, (s.x / this.cell) | 0)), gy = Math.max(0, Math.min(this.gh - 1, (s.y / this.cell) | 0));
-      const k = gy * this.gw + gx; (g[k] || (g[k] = [])).push(s);
+      g[gy * this.gw + gx].push(s);
     }
   }
   nearestEnemy(s, radius) {
-    const c = this.cell, r = Math.ceil(radius / c);
-    const gx = (s.x / c) | 0, gy = (s.y / c) | 0;
+    const c = this.cell, R = Math.ceil(radius / c);
+    const gx = Math.max(0, Math.min(this.gw - 1, (s.x / c) | 0)), gy = Math.max(0, Math.min(this.gh - 1, (s.y / c) | 0));
     let best = null, bd = radius * radius;
-    for (let y = Math.max(0, gy - r); y <= Math.min(this.gh - 1, gy + r); y++) for (let x = Math.max(0, gx - r); x <= Math.min(this.gw - 1, gx + r); x++) {
-      const cellList = this.grid[y * this.gw + x]; if (!cellList) continue;
-      for (const o of cellList) { if (o.side === s.side || o.div.routed) continue; const d = (o.x - s.x) ** 2 + (o.y - s.y) ** 2; if (d < bd) { bd = d; best = o; } }
+    for (let r = 0; r <= R; r++) {
+      for (let y = gy - r; y <= gy + r; y++) {
+        if (y < 0 || y >= this.gh) continue;
+        const edge = y === gy - r || y === gy + r;
+        for (let x = gx - r; x <= gx + r; x += edge ? 1 : 2 * r || 1) {
+          if (x < 0 || x >= this.gw) continue;
+          const list = this.grid[y * this.gw + x]; if (!list.length) continue;
+          for (let i = 0; i < list.length; i++) { const o = list[i]; if (o.side === s.side || o.div.routed) continue; const d = (o.x - s.x) * (o.x - s.x) + (o.y - s.y) * (o.y - s.y); if (d < bd) { bd = d; best = o; } }
+        }
+      }
+      if (best && r >= 1) break; // close enough: rings further out can only be farther (give or take a cell)
     }
     return best;
   }
@@ -175,7 +186,7 @@ export class Battle {
   updateDivision(div, dt) {
     const alive = this.aliveCount(div);
     if (alive <= 0) { if (!div.gone) { div.gone = true; } return; }
-    const c = this.centroid(div);
+    const c = div.c || this.centroid(div);
     // officer follows behind the formation
     const o = div.officer;
     if (o.alive && !o.captured) {
@@ -210,7 +221,7 @@ export class Battle {
         if (div.flankPhase === 0 && div.flankPt) { goal = div.flankPt; if (Math.hypot(div.flankPt.x - c.x, div.flankPt.y - c.y) < 40) { div.flankPhase = 1; div.chargeT = this.t; } }
         else if (target) { goal = target.c; speedMul = 1.2; }
         break;
-      case 'retreat': goal = { x: div.side === 0 ? 120 : FIELD.w - 120, y: c.y }; if (Math.abs(goal.x - c.x) < 30) { div.state = 'hold'; } break;
+      case 'retreat': goal = { x: div.side === 0 ? 120 : this.fw - 120, y: c.y }; if (Math.abs(goal.x - c.x) < 30) { div.state = 'hold'; } break;
     }
     if (goal) {
       const dx = goal.x - div.cx, dy = goal.y - div.cy, d = Math.hypot(dx, dy);
@@ -220,7 +231,7 @@ export class Battle {
     // keep the anchor close to the actual troops so formations don't stretch
     const lag = Math.hypot(div.cx - c.x, div.cy - c.y);
     if (lag > 70) { div.cx = c.x + (div.cx - c.x) * 70 / lag; div.cy = c.y + (div.cy - c.y) * 70 / lag; }
-    div.cx = Math.max(30, Math.min(FIELD.w - 30, div.cx)); div.cy = Math.max(30, Math.min(FIELD.h - 30, div.cy));
+    div.cx = Math.max(30, Math.min(this.fw - 30, div.cx)); div.cy = Math.max(30, Math.min(this.fh - 30, div.cy));
   }
 
   rout(div) {
@@ -236,15 +247,15 @@ export class Battle {
     s.cd -= dt; s.at += dt * 6;
     if (s.hitT > 0) s.hitT -= dt;
     if (div.routed) {
-      const ex = div.side === 0 ? -30 : FIELD.w + 30;
+      const ex = div.side === 0 ? -30 : this.fw + 30;
       const dx = ex - s.x; s.x += Math.sign(dx) * st.spd * 1.25 * dt; s.y += (this.r() - 0.5) * 20 * dt; s.anim = 1; s.flip = dx < 0;
-      if (s.x < -10 || s.x > FIELD.w + 10) { s.fled = true; div.fled++; }
+      if (s.x < -10 || s.x > this.fw + 10) { s.fled = true; div.fled++; }
       return;
     }
     const ranged = div.role === 'ranged' || div.role === 'magic';
     const engageR = ranged ? st.range : (div.state === 'hold' ? 45 : 85);
     let e = s.target && s.target.alive && !s.target.fled && !s.target.div.routed && (s.target.x - s.x) ** 2 + (s.target.y - s.y) ** 2 < engageR * engageR ? s.target : null;
-    if (!e && (s.cd <= 0 || this.r() < 0.08)) { e = this.nearestEnemy(s, engageR); s.target = e; }
+    if (!e && ((s.slot + this.steps) % 3 === 0 || this.r() < 0.03)) { e = this.nearestEnemy(s, engageR); s.target = e; }
     let mx = 0, my = 0, moving = false;
     if (e) {
       const dx = e.x - s.x, dy = e.y - s.y, d = Math.hypot(dx, dy) || 1;
@@ -276,7 +287,7 @@ export class Battle {
       const list = this.grid[(Math.max(0, Math.min(this.gh - 1, (s.y / this.cell) | 0))) * this.gw + Math.max(0, Math.min(this.gw - 1, (s.x / this.cell) | 0))];
       if (list) for (let i = 0; i < Math.min(list.length, 8); i++) { const o = list[(i * 7 + s.slot) % list.length]; if (o === s) continue; const dx = s.x - o.x, dy = s.y - o.y, d2 = dx * dx + dy * dy; if (d2 < 49 && d2 > 0.01) { const d = Math.sqrt(d2); s.x += dx / d * (7 - d) * 0.5; s.y += dy / d * (7 - d) * 0.5; } }
     }
-    s.x = Math.max(4, Math.min(FIELD.w - 4, s.x)); s.y = Math.max(8, Math.min(FIELD.h - 4, s.y));
+    s.x = Math.max(4, Math.min(this.fw - 4, s.x)); s.y = Math.max(8, Math.min(this.fh - 4, s.y));
     if (s.atkT > 0) s.atkT -= dt; else s.anim = moving ? 1 : 0;
     if (s.hitT > 0 && s.anim !== 2) s.anim = 3;
     // officer in danger
