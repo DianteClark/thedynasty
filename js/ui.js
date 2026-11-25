@@ -212,10 +212,8 @@ function drawMap() {
   const live = world.setts.filter(s => !s.destroyed && s.realmId && world.realm(s.realmId)?.alive);
   g.globalAlpha = 0.42;
   for (let y = 0; y < world.h; y++) for (let x = 0; x < world.w; x++) {
-    if (world.grid[y][x] === 'water') continue;
-    let best = null, bd = 12;
-    for (const s of live) { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s; } }
-    if (best) { g.fillStyle = world.realm(best.realmId).color; g.fillRect(x * cs, y * cs, cs, cs); }
+    const best = world.terr[y * world.w + x] && world.sett(world.terr[y * world.w + x]);
+    if (best && !best.destroyed && world.realm(best.realmId)?.alive) { g.fillStyle = world.realm(best.realmId).color; g.fillRect(x * cs, y * cs, cs, cs); }
   }
   g.globalAlpha = 1;
   // lairs
@@ -303,6 +301,10 @@ function renderStats() {
   const strongest = world.char(world.unique.strongest);
   let html = `<div class="card"><h3>World</h3><div class="sub">Seed “${esc(world.seed)}” · ${SIZES[world.size].label} map · Year ${world.year}</div>
     <div class="kv"><div><b>${world.living().length}</b><small>Living people</small></div><div><b>${world.realmList().length}</b><small>Realms</small></div><div><b>${world.realmList().filter(r => r.tier === 'Kingdom').length}</b><small>Kingdoms</small></div></div></div>`;
+  const conts = (world.lands || []).filter(l => l.kind === 'continent').sort((a, b) => b.size - a.size), isles = (world.lands || []).filter(l => l.kind !== 'continent');
+  const wildsBy = b => (world.wilds || []).filter(x => x.biome === b && x.size >= 35).sort((a, b) => b.size - a.size).map(x => esc(x.name[0].toUpperCase() + x.name.slice(1)));
+  html += `<div class="card"><h3>🗺 Lands and seas</h3><div class="sub">${conts.length} continent${conts.length === 1 ? '' : 's'}: ${conts.map(c => `<b>${esc(c.name)}</b>`).join(', ')}. ${isles.filter(l => l.kind === 'island').length} islands and many small isles. Reaching another landmass means sailing from a port.</div>
+    ${[['forest', '🌲 Forests'], ['swamp', '🌫 Marshes'], ['mountain', '⛰ Mountains'], ['tundra', '❄ Frozen wastes'], ['wasteland', '🏜 Badlands']].map(([b, l]) => wildsBy(b).length ? `<div class="sub" style="margin-top:6px"><b>${l}:</b> ${wildsBy(b).slice(0, 8).join(', ')}</div>` : '').join('')}</div>`;
   html += `<div class="card"><h3>★ Strongest Under Heaven</h3><div class="sub">${strongest && strongest.alive ? `${charPill(strongest)} holds the title. Beat them in a duel to take it.` : 'The title is unclaimed.'}</div></div>`;
   html += `<div class="stats">${items.map(([k, l]) => `<div class="stat"><b>${s[k].toLocaleString()}</b><small>${l}</small></div>`).join('')}</div>`;
   if (titled.length) {

@@ -2,16 +2,19 @@
 // Runs month by month. Everything that happens is written to the Chronicle.
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
 import { Battle, UNITS } from './battle.js';
+import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
 function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export const SIZES = {
-  small: { w: 40, h: 28, setts: 34, label: 'Small' },
-  large: { w: 60, h: 40, setts: 70, label: 'Large' },
-  enormous: { w: 84, h: 56, setts: 130, label: 'Enormous' },
+  small: { w: 96, h: 64, setts: 70, conts: 2, isles: 6, label: 'Small' },
+  large: { w: 140, h: 92, setts: 140, conts: 3, isles: 10, label: 'Large' },
+  enormous: { w: 180, h: 120, setts: 220, conts: 4, isles: 16, label: 'Enormous' },
 };
+// how far things move in a month, in map cells
+export const MOVE = { land: 5, sea: 9 };
 
 export const SEASONS = ['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer', 'Summer', 'Summer', 'Autumn', 'Autumn', 'Autumn', 'Winter'];
 export const MONTHS = ['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'];
@@ -103,44 +106,69 @@ export class World {
         return a + (b - a) * s(ty);
       };
     };
-    const e1 = noise(9), e2 = noise(4), m1 = noise(8), m2 = noise(3);
+    const S = SIZES[this.size];
+    const e2 = noise(5), e3 = noise(2.5), m1 = noise(14), m2 = noise(5), wx = noise(12), wy = noise(12), ridge = noise(7), lat = noise(10);
+    // continents: big warped ellipses spread over the map; islands: small ones in the gaps
+    const blobs = [];
+    const fits = (x, y, r, k = 1.15) => blobs.every(b => Math.hypot(b.x - x, b.y - y) > (b.r + r) * k);
+    const contR = Math.sqrt(w * h * 0.3 / S.conts / Math.PI);
+    for (let i = 0, tries = 0; i < S.conts && tries < 400; tries++) {
+      const r = contR * (0.8 + this.r() * 0.4), x = r * 0.85 + this.r() * (w - r * 1.7), y = r * 0.7 + this.r() * (h - r * 1.4);
+      if (fits(x, y, r, tries > 250 ? 0.95 : 1.2) || tries > 380) { blobs.push({ x, y, r, sx: 1 + this.r() * 0.5, sy: 0.75 + this.r() * 0.3 }); i++; }
+    }
+    for (let i = 0, tries = 0; i < S.isles && tries < 600; tries++) {
+      const r = 2.5 + this.r() * 4.5, x = 6 + this.r() * (w - 12), y = 6 + this.r() * (h - 12);
+      if (fits(x, y, r + 2, 1)) { blobs.push({ x, y, r, sx: 1, sy: 1, isle: true }); i++; }
+    }
     this.grid = [];
     for (let y = 0; y < h; y++) {
       const row = [];
       for (let x = 0; x < w; x++) {
-        const dx = (x / w - 0.5) * 2, dy = (y / h - 0.5) * 2;
-        const edge = Math.max(Math.abs(dx), Math.abs(dy));
-        let e = e1(x, y) * 0.7 + e2(x, y) * 0.3 - Math.max(0, edge - 0.72) * 1.6;
+        const qx = x + (wx(x, y) - 0.5) * 22, qy = y + (wy(x, y) - 0.5) * 22;
+        let e = 0;
+        for (const B of blobs) { const d = Math.hypot((qx - B.x) / B.sx, (qy - B.y) / B.sy) / B.r; e = Math.max(e, 1 - d); }
+        e += (e2(x, y) - 0.5) * 0.35 + (e3(x, y) - 0.5) * 0.12;
+        const edge = Math.min(x, y, w - 1 - x, h - 1 - y); if (edge < 3) e -= (3 - edge) * 0.3;
         const m = m1(x, y) * 0.7 + m2(x, y) * 0.3;
+        const ly = y / h + (lat(x, y) - 0.5) * 0.08;
         let b;
-        if (e < 0.36) b = 'water';
-        else if (e > 0.7) b = 'mountain';
-        else if (y < h * 0.16) b = 'tundra';
-        else if (m > 0.62 && e < 0.48) b = 'swamp';
-        else if (m < 0.33) b = 'wasteland';
+        if (e < 0.08) b = 'water';
+        else if (e > 0.42 && ridge(x, y) > 0.6) b = 'mountain';
+        else if (ly < 0.13 || ly > 0.93) b = 'tundra';
+        else if (m > 0.6 && e < 0.32) b = 'swamp';
+        else if (m < 0.36 && ly > 0.45) b = 'wasteland';
+        else if (m < 0.3) b = 'wasteland';
         else if (m > 0.5) b = 'forest';
         else b = 'plains';
         row.push(b);
       }
       this.grid.push(row);
     }
-    // Culture homelands
+    this.setts = [];
+    buildGeo(this, false);
+    // Culture homelands, spread out so continents feel different
     const land = [];
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (this.grid[y][x] !== 'water') land.push({ x, y });
-    const centers = CULTURES.map(c => {
-      const fits = land.filter(p => c.home.includes(this.grid[p.y][p.x]));
-      const p = fits.length ? this.pick(fits) : this.pick(land);
-      return { c, x: p.x, y: p.y };
-    });
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (this.grid[y][x] !== 'water') land.push({ x, y, l: this.landId[y * w + x] });
+    const mainLand = land.filter(p => this.lands[p.l - 1].kind === 'continent');
+    const centers = [];
+    for (const c of this.shuffle([...CULTURES])) {
+      let fitsC = mainLand.filter(p => c.home.includes(this.grid[p.y][p.x])); if (!fitsC.length) fitsC = mainLand.length ? mainLand : land;
+      let best = null, bs = -1;
+      for (let k = 0; k < 40; k++) { const p = this.pick(fitsC); const sc = centers.length ? Math.min(...centers.map(cc => Math.hypot(cc.x - p.x, cc.y - p.y))) : 0; if (sc > bs) { bs = sc; best = p; } }
+      centers.push({ c, x: best.x, y: best.y, l: best.l });
+    }
     const cultureAt = (x, y) => {
+      const l = this.landId[y * w + x]; const pool = centers.some(cc => cc.l === l) ? centers.filter(cc => cc.l === l) : centers;
       let best = null, bd = 1e9;
-      for (const cc of centers) { const d = (cc.x - x) ** 2 + (cc.y - y) ** 2 - (cc.c.home.includes(this.grid[y][x]) ? 30 : 0); if (d < bd) { bd = d; best = cc.c; } }
+      for (const cc of pool) { const d = (cc.x - x) ** 2 + (cc.y - y) ** 2 - (cc.c.home.includes(this.grid[y][x]) ? 60 : 0); if (d < bd) { bd = d; best = cc.c; } }
       return best;
     };
     // Settlements
     const target = SIZES[this.size].setts;
-    const spots = this.shuffle(land.filter(p => this.grid[p.y][p.x] !== 'mountain' || this.chance(0.25)));
-    const minD = Math.max(3, Math.sqrt((w * h) / target) * 0.75);
+    const spots = this.shuffle(land.filter(p => this.lands[p.l - 1].size >= 12 && (this.grid[p.y][p.x] !== 'mountain' || this.chance(0.25))));
+    const minD = Math.max(3, Math.sqrt(land.length / target) * 0.8);
+    // every island big enough to live on gets at least one village
+    for (const L of this.lands.filter(L => L.kind === 'island')) { const i = spots.findIndex(p => p.l === L.id); if (i > 0) spots.unshift(spots.splice(i, 1)[0]); }
     for (const p of spots) {
       if (this.setts.length >= target) break;
       if (this.setts.some(s => (s.x - p.x) ** 2 + (s.y - p.y) ** 2 < minD * minD)) continue;
@@ -151,17 +179,21 @@ export class World {
         guard: 'Light', headmanId: null,
       });
     }
-    // Monster lairs in wild places
-    const wild = land.filter(p => ['forest', 'swamp', 'mountain', 'tundra', 'wasteland'].includes(this.grid[p.y][p.x]) && !this.setts.some(s => (s.x - p.x) ** 2 + (s.y - p.y) ** 2 < 9));
-    const lairCount = Math.round(target / 6);
+    buildGeo(this, true); buildTerritory(this);
+    // Monster lairs in wild places, mostly inside the named wilds
+    const wild = land.filter(p => ['forest', 'swamp', 'mountain', 'tundra', 'wasteland'].includes(this.grid[p.y][p.x]) && !this.setts.some(s => (s.x - p.x) ** 2 + (s.y - p.y) ** 2 < 9) && (this.wildId[p.y * w + p.x] || this.chance(0.3)));
+    const lairCount = Math.round(target / 5);
     const peaks = wild.filter(p => this.grid[p.y][p.x] === 'mountain'); if (peaks.length) wild.unshift(this.pick(peaks));
     for (let i = 0; i < lairCount && wild.length; i++) {
       const p = i === 0 ? wild[0] : this.pick(wild);
       const b = this.grid[p.y][p.x];
       const opts = MONSTERS.filter(m => m.key !== 'dragon' && m.biomes.includes(b));
       const m = i === 0 ? MON.dragon : this.pick(opts.length ? opts : [MON.wolves]);
-      this.lairs.push({ id: this.id(), x: p.x, y: p.y, key: m.key, base: m.power, strength: this.ri(10, 30), alive: true });
+      this.lairs.push(this.newLair(p, m, this.ri(10, 30)));
     }
+    // unexplored caves in the mountains and badlands: quiet now, but things live in the dark
+    const deep = wild.filter(p => this.grid[p.y][p.x] === 'mountain' || this.grid[p.y][p.x] === 'wasteland');
+    for (let i = 0; i < Math.round(target / 18) && deep.length; i++) { const p = this.pick(deep); const opts = MONSTERS.filter(m => m.key !== 'dragon' && !m.rift && m.biomes.includes(this.grid[p.y][p.x])); this.lairs.push({ ...this.newLair(p, this.pick(opts.length ? opts : [MON.basilisk]), this.ri(2, 8)), cave: true }); }
     // Realms: capitals grab nearby settlements
     const nCap = Math.max(3, Math.round(target / 10));
     const caps = [];
@@ -177,6 +209,7 @@ export class World {
       for (const s of this.setts) {
         if (s.realmId || this.dist(s, cap) > R) continue;
         const nearest = caps.reduce((a, c) => (this.dist(s, c) < this.dist(s, a) ? c : a));
+        if (this.landId[s.y * w + s.x] !== this.landId[cap.y * w + cap.x]) continue;
         if (nearest === cap) this.joinRealm(s, realm);
       }
     }
@@ -204,7 +237,17 @@ export class World {
     this.log(3, 'world', `The chronicle begins. ${this.realmList().filter(r => r.tier === 'Kingdom').length} kingdoms, ${this.realmList().filter(r => r.tier === 'Lordship').length} lordships and ${this.realmList().filter(r => r.tier === 'Village').length} free villages share the land.`, []);
   }
 
-  dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  // distance on the map; places across the sea count as much farther apart
+  dist(a, b) { const d = Math.hypot(a.x - b.x, a.y - b.y); if (!this.landId) return d; const la = landAt(this, a), lb = landAt(this, b); return la && lb && la !== lb ? d + 30 : d; }
+  newLair(p, m, strength) {
+    const L = { id: this.id(), x: p.x, y: p.y, key: m.key, base: m.power, strength, alive: true, wild: this.wildId ? this.wildId[p.y * this.w + p.x] || 0 : 0 };
+    if (m.power >= 2.4 && m.key !== 'dragon' && !m.rift && this.chance(0.6)) L.name = beastName(() => this.r());
+    return L;
+  }
+  tripMonths(from, to) { return tripMonths(this, from, to, MOVE.land * 1.05 * (this.season === 'Winter' ? 0.55 : 1), MOVE.sea); }
+  wildOf(p) { const id = this.wildId && this.wildId[Math.round(p.y) * this.w + Math.round(p.x)]; return id ? this.wilds[id - 1] : null; }
+  lairName(L) { const M = MON[L.key]; const wd = L.wild && this.wilds[L.wild - 1]; return `${L.name ? `${L.name}, ${M.the}` : M.the}${wd ? ` of ${wd.name}` : ''}`; }
+  landName(p) { const l = this.landId && landAt(this, p); return l ? this.lands[l - 1].name : ''; }
   placeName(cul) { let n; let guard = 0; do { n = this.pick(cul.p1) + this.pick(cul.p2); guard++; } while (this.setts.some(s => s.name === n) && guard < 20); return n; }
   personName(cul, female) { return female ? this.pick(cul.f) + this.pick(cul.fe) : this.pick(cul.m) + this.pick(cul.me); }
   dynastyName() { return this.pick(DYNASTY_PARTS) + this.pick(DYNASTY_SUFFIX); }
@@ -325,6 +368,7 @@ export class World {
     this.economy();
     this.unrestAndUprisings();
     this.monsters();
+    this.worldEvents();
     this.outlaws();
     this.warfare();
     this.intrigue();
@@ -480,10 +524,10 @@ export class World {
         if (force > 200 && s.pop < 500 && (!r || s.id !== r.capital || r.setts.size === 1) && this.chance(0.5)) {
           s.destroyed = true; s.pop = 0; this.stats.destroyed++;
           if (r) { r.setts.delete(s.id); if (r.setts.size === 0) this.killRealm(r, null); else if (r.capital === s.id) this.moveCapital(r); }
-          const M = MON[L.key]; this.log(3, 'monster', M.key === 'dragon' ? `The red dragon descends on ${s.name} and burns it to the ground. Only ash and bones remain.` : `${M.horde} ${M.rift ? 'tears open beside' : 'pours out of the wilds and falls upon'} ${s.name}, destroying it. Only ruins remain.`, []);
+          const M = MON[L.key]; const wd = this.wildOf(L); this.log(3, 'monster', M.key === 'dragon' ? `The red dragon descends from ${wd ? wd.name : 'the peaks'} on ${s.name} and burns it to the ground. Only ash and bones remain.` : `${L.name ? L.name + ', ' + M.horde.toLowerCase().replace(/^(a|an|the) /, 'a ') + ',' : M.horde} ${M.rift ? 'tears open beside' : `pours out of ${wd ? wd.name : 'the wilds'} and falls upon`} ${s.name}, destroying it. Only ruins remain.`, []);
         } else {
           s.pop = Math.round(s.pop * (0.75 + this.r() * 0.15)); s.unrest += 15; s.food -= s.pop * 0.05;
-          this.log(2, 'monster', `${MON[L.key].horde} ravages the lands around ${s.name}. The survivors beg for a champion.`, []);
+          this.log(2, 'monster', `${L.name || MON[L.key].horde} ${L.cave ? 'crawls out of a cave and ravages' : 'ravages'} the lands around ${s.name}. The survivors beg for a champion.`, []);
         }
         L.strength *= 0.7;
       }
@@ -505,26 +549,82 @@ export class World {
           if (M.key === 'dragon' && mode === 'slay') title = 'Dragonslayer';
           const got = this.grantDeed(h, title);
           L.alive = mode === 'trap' || mode === 'tame' ? false : false;
-          const verb = mode === 'tame' ? `tames ${M.the} and leads the beasts home to fight in their army` : mode === 'trap' ? `captures ${M.the} alive in cunning snares` : M.rift ? `fights through the elementals and closes ${M.the}` : `slays ${M.the}`;
+          const verb = mode === 'tame' ? `tames ${this.lairName(L)} and leads the beasts home to fight in their army` : mode === 'trap' ? `captures ${this.lairName(L)} alive in cunning snares` : M.rift ? `fights through the elementals and closes ${this.lairName(L)}` : `slays ${this.lairName(L)}`;
           this.log(L.base >= 2.8 ? 3 : 2, 'monster', `${this.fullName(h)} ${verb}.${got ? ` Bards now call them ${title}.` : ''}`, [h.id]);
           // a new lair may form somewhere later
           if (this.chance(0.6)) this.respawnLair(L);
         } else if (this.chance(0.5)) {
-          this.die(h, `killed by ${MON[L.key].the}`);
-          this.log(2, 'monster', `${this.fullName(h)} rides out to face ${MON[L.key].the} and does not return.`, [h.id]);
+          this.die(h, `killed by ${this.lairName(L)}`);
+          this.log(2, 'monster', `${this.fullName(h)} rides out to face ${this.lairName(L)} and does not return.`, [h.id]);
         } else {
           h.wounded = 6;
-          this.log(1, 'monster', `${this.fullName(h)} is driven back, badly wounded, by ${MON[L.key].the}.`, [h.id]);
+          this.log(1, 'monster', `${this.fullName(h)} is driven back, badly wounded, by ${this.lairName(L)}.`, [h.id]);
         }
       }
     }
+  }
+  // ---------- 2.1 the land itself: earthquakes, wildfires, floods ----------
+  worldEvents() {
+    const k = this.setts.length / 140; // bigger worlds see more of it
+    const mi = this.year * 12 + this.month;
+    const mark = (x, y, r, what) => { (this.changes || (this.changes = [])).push({ x, y, r, what, at: mi }); this.terrainRev = (this.terrainRev || 0) + 1; if (this.changes.length > 200) this.changes.shift(); };
+    const live = this.setts.filter(s => !s.destroyed);
+    // earthquake: a cave yawns open and something crawls out of it
+    if (this.chance(0.012 * k)) {
+      const s = this.pick(live); const wd = this.wildOf(s); const r = this.realm(s.realmId);
+      s.pop = Math.round(s.pop * (0.85 + this.r() * 0.1)); s.unrest += 10;
+      const spots = [];
+      for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) { const x = s.x + dx, y = s.y + dy, b = this.grid[y]?.[x]; if (b && b !== 'water' && Math.abs(dx) + Math.abs(dy) > 2 && landAt(this, { x, y }) === landAt(this, s)) spots.push({ x, y, b }); }
+      const p = spots.length ? this.pick(spots) : null;
+      let cave = '';
+      if (p && this.chance(0.7)) {
+        const opts = MONSTERS.filter(m => m.key !== 'dragon' && !m.rift && m.biomes.includes(p.b === 'plains' ? 'forest' : p.b));
+        const L = { ...this.newLair(p, this.pick(opts.length ? opts : [MON.wolves]), this.ri(12, 26)), cave: true };
+        this.lairs.push(L); cave = ` A cave yawns open nearby. Out of it comes ${this.lairName(L)}.`;
+      }
+      mark(s.x, s.y, 5, 'earthquake');
+      if (s.pop < 120 && this.chance(0.3)) this.wipeOut(s, `An earthquake levels ${s.name}${r && r.setts.size > 1 ? ` in ${r.name}` : ''}. Nothing is left standing.${cave}`);
+      else this.log(2, 'quake', `The earth shakes around ${s.name}${wd ? ` near ${wd.name}` : ''}. Houses fall and people die.${cave}`, []);
+    }
+    // wildfire in a summer forest: the wood burns back to open land
+    if (this.season === 'Summer' && this.chance(0.025 * k)) {
+      const woods = this.wilds.filter(w => w.biome === 'forest' && w.size > 30);
+      if (woods.length) {
+        const wd = this.pick(woods); let burned = 0; const st = [[wd.x, wd.y]]; const seen = new Set();
+        while (st.length && burned < this.ri(15, 45)) { const [x, y] = st.shift(); const key = y * this.w + x; if (seen.has(key)) continue; seen.add(key); if (this.grid[y]?.[x] !== 'forest') continue; this.grid[y][x] = 'plains'; burned++; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (this.chance(0.8)) st.push([x + dx, y + dy]); }
+        if (burned) {
+          mark(wd.x, wd.y, 5, 'wildfire');
+          const hit = live.find(s => Math.hypot(s.x - wd.x, s.y - wd.y) < 4);
+          if (hit && hit.pop < 250 && this.chance(0.35)) this.wipeOut(hit, `Wildfire sweeps out of ${wd.name} and burns ${hit.name} to the ground.`);
+          else { if (hit) { hit.food -= hit.pop * 0.1; hit.unrest += 8; } this.log(2, 'fire', `Wildfire rages through ${wd.name}${hit ? `, and smoke hangs over ${hit.name}` : ''}. Much of the wood is ash.`, []); }
+        }
+      }
+    }
+    // spring floods on low ground by the sea
+    if (this.season === 'Spring' && this.chance(0.02 * k)) {
+      const coast = live.filter(s => s.port && (s.biome === 'plains' || s.biome === 'swamp'));
+      if (coast.length) {
+        const s = this.pick(coast); let n = 0;
+        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const x = s.x + dx, y = s.y + dy; if (this.grid[y]?.[x] === 'plains' && this.chance(0.45) && (dx || dy)) { this.grid[y][x] = 'swamp'; n++; } }
+        mark(s.x, s.y, 4, 'flood');
+        s.food -= s.pop * 0.15; s.unrest += 6;
+        if (s.pop < 150 && this.chance(0.25)) this.wipeOut(s, `The sea rises and swallows ${s.name}. Only drowned fields remain.`);
+        else this.log(2, 'flood', `Floods drown the fields around ${s.name}${n > 6 ? ', and the land turns to marsh' : ''}.`, []);
+      }
+    }
+  }
+  wipeOut(s, text) {
+    const r = this.realm(s.realmId);
+    s.destroyed = true; s.pop = 0; this.stats.destroyed++;
+    if (r) { r.setts.delete(s.id); if (r.setts.size === 0) this.killRealm(r, null); else if (r.capital === s.id) this.moveCapital(r); }
+    this.log(3, 'disaster', text, []);
   }
   respawnLair(L) {
     const land = [];
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (['forest', 'swamp', 'mountain', 'tundra', 'wasteland'].includes(this.grid[y][x])) land.push({ x, y });
     const p = this.pick(land); const b = this.grid[p.y][p.x];
     const opts = MONSTERS.filter(m => m.key !== 'dragon' && m.biomes.includes(b)); const m = this.pick(opts.length ? opts : [MON.wolves]);
-    this.lairs.push({ id: this.id(), x: p.x, y: p.y, key: m.key, base: m.power, strength: 5, alive: true });
+    this.lairs.push(this.newLair(p, m, 5));
   }
 
   // ---------- vagabonds, bandits, mercenaries ----------
@@ -589,7 +689,10 @@ export class World {
       const aggro = (this.has(ruler, 'ambitious') ? 2 : 1) * (this.has(ruler, 'content') ? 0.3 : 1) * (this.has(ruler, 'reckless') ? 1.5 : 1) * (this.has(ruler, 'cautious') ? 0.6 : 1);
       if (!this.chance(0.006 * aggro * this.tune.war)) continue;
       const myStr = this.realmStrength(r);
-      const targets = this.neighbours(r).filter(o => !r.allies.has(o.id) && !((r.truce.get(o.id) || 0) > this.year) && this.realmStrength(o) < myStr * (this.has(ruler, 'reckless') ? 1.3 : 0.9));
+      let near = this.neighbours(r);
+      // with no rivals at hand, a realm with a harbour may look across the water
+      if (!near.length && this.realmSetts(r).some(s => s.port) && this.chance(0.35)) near = this.neighbours(r, 48).filter(o => this.realmSetts(o).some(s => s.port));
+      const targets = near.filter(o => !r.allies.has(o.id) && !((r.truce.get(o.id) || 0) > this.year) && this.realmStrength(o) < myStr * (this.has(ruler, 'reckless') ? 1.3 : 0.9));
       if (!targets.length) continue;
       const t = this.pick(targets);
       this.declareWar(r, t, this.pick(['a border dispute', 'an old grudge', 'a claim on their lands', 'insults at court', 'raids along the border']));
@@ -657,11 +760,10 @@ export class World {
     const offs = m.officers.map(id => this.char(id)).filter(o => o && o.alive && !o.prisonerOf && o.realmId === att.id && o.army);
     if (!offs.length) { w.march = null; return; }
     const g = this.grid[Math.max(0, Math.min(this.h - 1, Math.round(m.y)))]?.[Math.max(0, Math.min(this.w - 1, Math.round(m.x)))];
-    let speed = this.season === 'Winter' ? 1.6 : 3.2;
+    let speed = MOVE.land * (this.season === 'Winter' ? 0.5 : 1);
     if (g === 'swamp' || g === 'mountain') speed *= 0.6;
     if (g === 'forest') speed *= 0.8;
-    const dx = target.x - m.x, dy = target.y - m.y, d = Math.hypot(dx, dy);
-    if (d > speed) { m.x += dx / d * speed; m.y += dy / d * speed; for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
+    if (!advance(this, m, target, speed, MOVE.sea)) { for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
     m.x = target.x; m.y = target.y; w.march = null;
     const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3);
     this.battle(att, def, offs.slice(0, 3), dOff, target, w, m.attackerIsA);
@@ -740,9 +842,11 @@ export class World {
     // auto-resolve: the same engine with each soldier standing for a company of men
     const proxy = JSON.parse(JSON.stringify(cfg)); delete proxy.script;
     const biggest = Math.max(...proxy.sides.flatMap(s => s.divisions.map(d => d.count)));
-    const per = Math.max(1, biggest / 18);
+    const coarse = !this.playerId; // history before you arrive is told in broader strokes
+    const per = Math.max(1, biggest / (coarse ? 10 : 18));
     for (const side of proxy.sides) { if (!side.ai) side.ai = 'balanced'; for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per)); }
-    const b = new Battle(proxy); let n = 0; while (!b.over && n++ < 1000) b.step(0.3);
+    proxy.field = { w: 1000, h: 640 }; // a smaller table for the model armies: same fight, less empty ground to scan
+    const b = new Battle(proxy); let n = 0; while (!b.over && n++ < (coarse ? 400 : 700)) b.step(coarse ? 0.6 : 0.4);
     if (!b.over) { b.t = 999; b.checkEnd(); }
     return b;
   }
@@ -1475,11 +1579,9 @@ export class World {
       if (!dest || (t.bandit && !dest.alive) || (t.lair && !dest.alive)) { p.task = null; this.you(`Your quarry is gone before you arrive.`, [], 1); }
       else {
         const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
-        let sp = this.season === 'Winter' ? 1.8 : 3.4; if (g === 'swamp' || g === 'mountain') sp *= 0.6;
-        const d = Math.hypot(dest.x - p.x, dest.y - p.y);
-        if (d > sp) {
-          p.x += (dest.x - p.x) / d * sp; p.y += (dest.y - p.y) / d * sp;
-          const b = this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
+        let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.55 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
+        if (!advance(this, p, dest, sp, MOVE.sea)) {
+          const b = !p.atSea && this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
           if (b && !t.bandit && this.chance(0.06)) { p.task = null; this.you(`Bandits under ${this.fullName(b)} ambush you on the road!`, [b.id], 2); this.skirmish(b, true); }
         } else {
           p.x = dest.x; p.y = dest.y; p.task = null;
@@ -1535,13 +1637,14 @@ export class World {
   act_travel(a) {
     const p = this.player, s = this.sett(a.to); if (!s || p.role !== 'vagabond') return 'Only a wanderer can take to the road like this.';
     p.task = { type: 'travel', to: s.id };
-    return `You set out for ${s.name}. About ${Math.max(1, Math.ceil(this.dist(p, s) / 3.4))} month(s) on the road.`;
+    const months = this.tripMonths(p, s);
+    return `You set out for ${s.name}. About ${months} month${months === 1 ? '' : 's'} on the road${landAt(this, p) !== landAt(this, s) ? ', with a sea crossing' : ''}.`;
   }
   contractsHere() {
     const p = this.player; if (!p) return [];
     const out = [];
     for (const b of this.living()) if (b.role === 'bandit' && this.dist(b, p) < 9) out.push({ kind: 'bandit', id: b.id, label: `Hunt the bandit ${this.fullName(b)} (${b.band} cutthroats)`, reward: 20 + b.band, odds: this.banditOdds(b), dist: this.dist(b, p) });
-    for (const L of this.lairs) if (L.alive && L.strength > 18 && this.dist(L, p) < 11) out.push({ kind: 'lair', id: L.id, label: `Clear the lair of ${MON[L.key].the}`, reward: Math.round(30 + L.strength * L.base), lair: L, dist: this.dist(L, p) });
+    for (const L of this.lairs) if (L.alive && L.strength > 18 && this.dist(L, p) < 11) out.push({ kind: 'lair', id: L.id, label: `Clear the lair of ${this.lairName(L)}`, reward: Math.round(30 + L.strength * L.base), lair: L, dist: this.dist(L, p) });
     return out.sort((a, b) => a.dist - b.dist).slice(0, 6);
   }
   playerForce() { const p = this.player; return (p.followers || 0) * 1 + this.living().filter(x => x.companionOf === p.id).length * 4 + p.stats.mig * 0.6 + p.stats.lea * 0.4; }
@@ -1560,7 +1663,7 @@ export class World {
     if (a.approach === 'tame' && !MON[L.key].tame) return 'That cannot be tamed.';
     if (a.approach === 'trap' && (MON[L.key].rift || L.key === 'dragon')) return 'That cannot be trapped.';
     p.task = { type: 'contract', lair: L.id, approach: a.approach || 'slay' };
-    this.you(`You set out to ${a.approach || 'slay'} ${MON[L.key].the}.`, [], 1); return 'You set out for the lair.';
+    this.you(`You set out to ${a.approach || 'slay'} ${this.lairName(L)}.`, [], 1); return 'You set out for the lair.';
   }
   huntResolve(L, approach) {
     const p = this.player; const M = MON[L.key]; const odds = this.huntOdds(L, approach);
@@ -1570,11 +1673,11 @@ export class World {
       const got = this.grantDeed(p, title);
       if (approach === 'tame') p.followers = (p.followers || 0) + Math.round(6 * L.base);
       L.alive = false; if (this.chance(0.6)) this.respawnLair(L);
-      this.you(`You ${approach === 'tame' ? `tame ${M.the} and lead the beasts home` : approach === 'trap' ? `capture ${M.the} alive` : M.rift ? `fight through the elementals and close ${M.the}` : `slay ${M.the}`}. The villages pay you ${reward} gold.${got ? ` Bards now call you ${title}.` : ''}`, [], 3);
+      this.you(`You ${approach === 'tame' ? `tame ${this.lairName(L)} and lead the beasts home` : approach === 'trap' ? `capture ${this.lairName(L)} alive` : M.rift ? `fight through the elementals and close ${this.lairName(L)}` : `slay ${this.lairName(L)}`}. The villages pay you ${reward} gold.${got ? ` Bards now call you ${title}.` : ''}`, [], 3);
     } else {
       const lost = Math.round((p.followers || 0) * (0.3 + this.r() * 0.4)); p.followers = Math.max(0, (p.followers || 0) - lost);
-      if (this.chance(0.35 + (1 - odds) * 0.3)) this.die(p, `killed by ${M.the}`);
-      else { p.wounded = 8; this.you(`${M.the[0].toUpperCase() + M.the.slice(1)} drives you back. You escape badly wounded${lost ? `, and ${lost} of your followers do not` : ''}.`, [], 3); }
+      if (this.chance(0.35 + (1 - odds) * 0.3)) this.die(p, `killed by ${this.lairName(L)}`);
+      else { p.wounded = 8; this.you(`${(n => n[0].toUpperCase() + n.slice(1))(this.lairName(L))} drives you back. You escape badly wounded${lost ? `, and ${lost} of your followers do not` : ''}.`, [], 3); }
     }
   }
   skirmish(b, ambush) {
@@ -1861,9 +1964,10 @@ export class World {
 
   // ---------- 0.7 agents: everyone who travels on a mission is on the map ----------
   realmAt(x, y) {
-    let best = null, bd = 13.7;
-    for (const s of this.setts) { if (s.destroyed) continue; const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s; } }
-    const r = best && this.realm(best.realmId); return r && r.alive ? r : null;
+    const i = Math.max(0, Math.min(this.h - 1, Math.round(y))) * this.w + Math.max(0, Math.min(this.w - 1, Math.round(x)));
+    const best = this.terr && this.terr[i] ? this.sett(this.terr[i]) : null;
+    if (!best || best.destroyed) return null;
+    const r = this.realm(best.realmId); return r && r.alive ? r : null;
   }
   spawnAgent(kind, owner, from, to, data = {}) {
     if (!from || !to) return null;
@@ -1897,9 +2001,8 @@ export class World {
         if (b && this.chance(0.25)) { b.band += 4; b.fame += 3; this.log(1, 'bandit', `Bandits under ${this.fullName(b)} plunder a caravan of ${this.realm(a.owner)?.name || 'merchants'}.`, [b.id]); this.removeAgent(a); continue; }
       }
       if (a.stay > 0 && this.dist(a, dest) < 0.6) { this.agentStay(a, dest); continue; }
-      let sp = a.speed * (this.season === 'Winter' ? 0.65 : 1);
-      const d = Math.hypot(dest.x - a.x, dest.y - a.y);
-      if (d > sp) { a.x += (dest.x - a.x) / d * sp; a.y += (dest.y - a.y) / d * sp; continue; }
+      const sp = a.speed * (MOVE.land / 3.2) * (this.season === 'Winter' ? 0.65 : 1);
+      if (!advance(this, a, dest, sp, MOVE.sea)) continue;
       a.x = dest.x; a.y = dest.y;
       if (a.stay > 0) { this.agentStay(a, dest); continue; }
       this.agentArrive(a, dest);
@@ -2097,7 +2200,7 @@ export class World {
   toJSON() {
     const o = {};
     for (const [k, v] of Object.entries(this)) {
-      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', '_own'].includes(k) || typeof v === 'function') continue;
+      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', '_own', '_sea', 'ocean', 'landId', 'wildId', 'terr'].includes(k) || typeof v === 'function') continue;
       o[k] = v;
     }
     o.chars = [...this.chars.values()];
@@ -2111,6 +2214,7 @@ export class World {
     w.chars = new Map(o.chars.map(c => [c.id, c]));
     w.realms = new Map(o.realms.map(r => [r.id, { ...r, setts: new Set(r.setts), allies: new Set(r.allies), truce: new Map(r.truce) }]));
     w.pendingBattle = null; w.replaying = false; w.replayLog = null;
+    buildGeo(w, true); // land, sea, wilds and territories are rebuilt from the map
     applyMod(w.mod); if (!w.tune) w.tune = { war: 1, monsters: 1, famine: 1, plots: 1, tournaments: 1 };
     delete w.v;
     return w;

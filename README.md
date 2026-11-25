@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v1.0
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.1
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, somewhere in a world that has already lived through thirty years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -16,7 +16,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 
 ## What's in it
 
-- **A living world:** procedurally generated maps in three sizes, seasons, harvests and famine, a ladder of power from vagabond bands to kingdoms, overextension, uprisings with causes, succession crises, monsters that grow and break out, and ruins that get resettled.
+- **A living world:** procedurally generated worlds in three sizes with continents, islands and named wilds, ports and sailing, earthquakes, wildfires and floods that reshape the land, seasons, harvests and famine, a ladder of power from vagabond bands to kingdoms, overextension, uprisings with causes, succession crises, monsters that grow and break out, and ruins that get resettled.
 - **People:** officers with five stats, levels and up to three titles (rank, deed, reputation) that can counter each other; marriages, children who take after their parents, oaths, grudges, wards, rumors and reputations.
 - **War:** hosts march across the map; battles are fought on a real battle engine with HAS sprites for all ten cultures, morale and routs, flanking, messenger-delayed orders, stratagems, troop tiers you can recognise on sight, and generals who fight in character.
 - **Intrigue:** spies, assassins, agitators, envoys, caravans and rumors travel the map and can be caught or raided.
@@ -164,3 +164,14 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 
 - **Balance:** settlements now have a carrying capacity by land type, granaries have limits, and large families grow more slowly, so worlds stay healthy for centuries; AI rulers turn surplus gold into soldiers.
 - **Battle controls:** easier division selection (tap the formation, a soldier, or the officer's banner) and clear orders: the order in flight pulses gold with a countdown, and an order icon floats over each of your divisions.
+
+## 2.1: a huge world
+
+- **Continents and islands:** worlds are now up to 180 × 120 cells (about five times the old Enormous), with two to four named continents and a scatter of islands. Cultures settle far apart, so each continent feels different.
+- **Ports and sailing:** coastal settlements have docks, bigger ones a lighthouse. Reaching another landmass means riding to a port and taking ship; you, armies, spies and caravans all sail, and you can watch the ships cross the sea. Realms with harbours sometimes war across the water.
+- **Territories:** every patch of land belongs to its nearest settlement, which is what borders, spies' routes and local events use.
+- **Named wilds:** big forests, marshes, mountains, frozen wastes and badlands have names (the Raven Grove, the Bone Spine). Their monsters carry the name, and the deadliest have names of their own.
+- **The land changes:** earthquakes open caves that monsters crawl out of, summer wildfires burn forests back to open land, and spring floods turn coastal fields to marsh. Any of them can wipe out a village.
+- **Map:** only the part of the map on screen is drawn, so big worlds stay smooth; continent names show when zoomed out and wild names up close; the Stats tab lists the lands and wilds.
+- **New art from the HAS pack:** the sailing ship, docks, lighthouse and the cave entrance.
+

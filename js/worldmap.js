@@ -14,12 +14,16 @@ function loadArt() {
     load('assets/world/terrain.png').then(i => img.terrain = i),
     load('assets/world/buildings.png').then(i => img.buildings = i),
     load('assets/world/monsters.png').then(i => img.monsters = i),
+    load('assets/world/ship.png').then(i => img.ship = i),
     ...Object.keys(UNITS).map(f => load(`assets/units/${f}.png`).then(i => img['u_' + f] = i)),
   ]);
   return ready;
 }
 
-let W = null, root = null, canvas, g, mini, mg, terrainLayer = null, terrainKey = '', ownerKey = '', ownerLayer = null;
+let W = null, root = null, canvas, g, mini, mg, terrainKey = '', ownerKey = '';
+const CH = 32; // cells per map chunk (512px): only the chunks on screen are ever drawn
+const tChunks = new Map(), oChunks = new Map();
+const BCOL = { water: [34, 66, 104], plains: [112, 168, 76], forest: [44, 112, 54], swamp: [78, 104, 86], wasteland: [196, 168, 104], tundra: [226, 232, 238], mountain: [118, 100, 90] };
 let cam = { x: 0, y: 0, z: 1 }, raf = 0, sel = null, cb = {}, dpr = 1;
 
 export async function mountMap(container, world, callbacks) {
@@ -28,7 +32,7 @@ export async function mountMap(container, world, callbacks) {
   await loadArt();
   root = document.createElement('div'); root.className = 'wmap';
   root.innerHTML = `<canvas class="wm"></canvas><canvas class="wmini" width="168" height="112"></canvas>
-    <button class="bbtn wzoom" data-w="fit" aria-label="Show whole map">⤢</button><div class="wcard" id="wcard" hidden></div>`;
+    <button class="bbtn wzoom" data-w="fit" aria-label="Zoom out">⤢</button><div class="wcard" id="wcard" hidden></div>`;
   container.innerHTML = ''; container.appendChild(root);
   document.body.classList.add('map-mode');
   canvas = root.querySelector('.wm'); g = canvas.getContext('2d'); mini = root.querySelector('.wmini'); mg = mini.getContext('2d');
@@ -54,55 +58,72 @@ function fit() {
 
 // ---------- layers ----------
 function hash(x, y, k = 0) { let h = (x * 374761393 + y * 668265263 + k * 1442695041) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
-function buildTerrain() {
-  const key = W.seed + W.size; if (terrainKey === key) return; terrainKey = key;
-  const c = document.createElement('canvas'); c.width = W.w * T; c.height = W.h * T; const t = c.getContext('2d'); t.imageSmoothingEnabled = false;
-  const bi = b => Math.max(0, BIOMES.indexOf(b));
-  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
-    const b = W.grid[y][x];
-    if (b === 'water') { t.drawImage(img.terrain, 288, 0, 16, 16, x * T, y * T, T, T); continue; }
-    const v = hash(x, y) < 0.7 ? 0 : hash(x, y, 1) < 0.5 ? 1 : 2;
-    t.drawImage(img.terrain, bi(b) * 48 + v * 16, 0, 16, 16, x * T, y * T, T, T);
-  }
-  // shore shading
-  t.fillStyle = 'rgba(0,0,0,.18)';
-  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) if (W.grid[y][x] === 'water' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => W.grid[y + dy]?.[x + dx] && W.grid[y + dy][x + dx] !== 'water')) t.fillRect(x * T, y * T, T, T);
-  // objects sorted top to bottom so they overlap naturally
-  const objs = [];
-  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
-    const b = W.grid[y][x]; if (b === 'water') continue;
-    if (W.setts.some(s => Math.abs(s.x - x) <= 1 && Math.abs(s.y - y) <= 1)) continue;
-    if (b === 'mountain') objs.push({ y: y * T + 14, draw: () => t.drawImage(img.terrain, bi(b) * 32, 40, 32, 32, x * T - 8 + hash(x, y, 2) * 4, y * T - 14, 32, 32) });
-    const density = b === 'forest' ? 2 : b === 'swamp' ? 0.6 : b === 'tundra' ? 0.45 : b === 'plains' ? 0.12 : b === 'wasteland' ? 0.1 : 0;
-    for (let k = 0; k < 2; k++) if (hash(x, y, 3 + k) < density / 2) {
-      const ox = hash(x, y, 5 + k) * 10 - 5, oy = hash(x, y, 7 + k) * 8 - 4, v = hash(x, y, 9 + k) < 0.5 ? 0 : 1;
-      objs.push({ y: y * T + oy + 12, draw: () => t.drawImage(img.terrain, bi(b) * 48 + v * 24, 16, 24, 24, x * T - 4 + ox, y * T - 10 + oy, 24, 24) });
-    }
-  }
-  objs.sort((a, b) => a.y - b.y).forEach(o => o.draw());
-  terrainLayer = c;
-}
-function buildOwners() {
+function invalidate() {
+  const key = W.seed + W.size + ':' + (W.terrainRev || 0);
+  if (terrainKey !== key) { terrainKey = key; tChunks.clear(); mini && (mini._bg = null); W._nearSett = null; }
   const live = W.setts.filter(s => !s.destroyed && s.realmId && W.realm(s.realmId)?.alive);
-  const key = live.map(s => s.id + ':' + s.realmId).join(',');
-  if (key === ownerKey && ownerLayer) return; ownerKey = key;
-  const own = Array.from({ length: W.h }, () => new Array(W.w).fill(null));
-  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
-    if (W.grid[y][x] === 'water') continue;
-    let best = null, bd = 14;
-    for (const s of live) { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s; } }
-    if (best) own[y][x] = best.realmId;
-  }
-  const c = document.createElement('canvas'); c.width = W.w * T; c.height = W.h * T; const o = c.getContext('2d');
-  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
-    const id = own[y][x]; if (!id) continue; const col = W.realm(id).color;
-    o.globalAlpha = 0.2; o.fillStyle = col; o.fillRect(x * T, y * T, T, T); o.globalAlpha = 0.95;
-    if (own[y][x + 1] !== id) o.fillRect(x * T + T - 2, y * T, 2, T);
-    if (own[y][x - 1] !== id) o.fillRect(x * T, y * T, 2, T);
-    if (own[y + 1]?.[x] !== id) o.fillRect(x * T, y * T + T - 2, T, 2);
-    if (own[y - 1]?.[x] !== id) o.fillRect(x * T, y * T, T, 2);
-  }
-  ownerLayer = c; W._own = own;
+  const ok = live.map(s => s.id + ':' + s.realmId).join(',');
+  if (ok !== ownerKey) { ownerKey = ok; oChunks.clear(); mini && (mini._bg = null); }
+}
+function lru(map, key, make) {
+  let c = map.get(key); if (c) { map.delete(key); map.set(key, c); return c; }
+  c = make(); map.set(key, c); if (map.size > 28) map.delete(map.keys().next().value); return c;
+}
+function nearSett() {
+  if (W._nearSett) return W._nearSett;
+  const set = new Set(); for (const s of W.setts) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) set.add((s.y + dy) * W.w + s.x + dx);
+  return (W._nearSett = set);
+}
+function terrainChunk(cx, cy) {
+  return lru(tChunks, cx + ',' + cy, () => {
+    const x0 = cx * CH, y0 = cy * CH, x1 = Math.min(W.w, x0 + CH), y1 = Math.min(W.h, y0 + CH);
+    const c = document.createElement('canvas'); c.width = CH * T; c.height = CH * T; const t = c.getContext('2d'); t.imageSmoothingEnabled = false;
+    t.translate(-x0 * T, -y0 * T);
+    const bi = b => Math.max(0, BIOMES.indexOf(b));
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const b = W.grid[y][x];
+      if (b === 'water') { t.drawImage(img.terrain, 288, 0, 16, 16, x * T, y * T, T, T); continue; }
+      const v = hash(x, y) < 0.7 ? 0 : hash(x, y, 1) < 0.5 ? 1 : 2;
+      t.drawImage(img.terrain, bi(b) * 48 + v * 16, 0, 16, 16, x * T, y * T, T, T);
+    }
+    t.fillStyle = 'rgba(0,0,0,.18)';
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (W.grid[y][x] === 'water' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => W.grid[y + dy]?.[x + dx] && W.grid[y + dy][x + dx] !== 'water')) t.fillRect(x * T, y * T, T, T);
+    // trees and peaks may hang over the chunk edge, so neighbours' objects are drawn too (clipped by the canvas)
+    const objs = []; const near = nearSett();
+    for (let y = Math.max(0, y0 - 2); y < Math.min(W.h, y1 + 3); y++) for (let x = Math.max(0, x0 - 2); x < Math.min(W.w, x1 + 2); x++) {
+      const b = W.grid[y][x]; if (b === 'water' || near.has(y * W.w + x)) continue;
+      if (b === 'mountain') objs.push({ y: y * T + 14, draw: () => t.drawImage(img.terrain, bi(b) * 32, 40, 32, 32, x * T - 8 + hash(x, y, 2) * 4, y * T - 14, 32, 32) });
+      const density = b === 'forest' ? 2 : b === 'swamp' ? 0.6 : b === 'tundra' ? 0.45 : b === 'plains' ? 0.12 : b === 'wasteland' ? 0.1 : 0;
+      for (let k = 0; k < 2; k++) if (hash(x, y, 3 + k) < density / 2) {
+        const ox = hash(x, y, 5 + k) * 10 - 5, oy = hash(x, y, 7 + k) * 8 - 4, v = hash(x, y, 9 + k) < 0.5 ? 0 : 1;
+        objs.push({ y: y * T + oy + 12, draw: () => t.drawImage(img.terrain, bi(b) * 48 + v * 24, 16, 24, 24, x * T - 4 + ox, y * T - 10 + oy, 24, 24) });
+      }
+    }
+    objs.sort((a, b) => a.y - b.y).forEach(o => o.draw());
+    return c;
+  });
+}
+function ownerAt(x, y) {
+  if (x < 0 || y < 0 || x >= W.w || y >= W.h) return null;
+  const sid = W.terr[y * W.w + x]; if (!sid) return null;
+  const s = W.sett(sid); if (!s || s.destroyed) return null;
+  const r = W.realm(s.realmId); return r && r.alive ? r.id : null;
+}
+function ownerChunk(cx, cy) {
+  return lru(oChunks, cx + ',' + cy, () => {
+    const x0 = cx * CH, y0 = cy * CH, x1 = Math.min(W.w, x0 + CH), y1 = Math.min(W.h, y0 + CH);
+    const c = document.createElement('canvas'); c.width = CH * T; c.height = CH * T; const o = c.getContext('2d');
+    o.translate(-x0 * T, -y0 * T);
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const id = ownerAt(x, y); if (!id) continue; const col = W.realm(id).color;
+      o.globalAlpha = 0.2; o.fillStyle = col; o.fillRect(x * T, y * T, T, T); o.globalAlpha = 0.95;
+      if (ownerAt(x + 1, y) !== id) o.fillRect(x * T + T - 2, y * T, 2, T);
+      if (ownerAt(x - 1, y) !== id) o.fillRect(x * T, y * T, 2, T);
+      if (ownerAt(x, y + 1) !== id) o.fillRect(x * T, y * T + T - 2, T, 2);
+      if (ownerAt(x, y - 1) !== id) o.fillRect(x * T, y * T, T, 2);
+    }
+    return c;
+  });
 }
 
 // ---------- sprites ----------
@@ -128,6 +149,20 @@ function drawUnitSprite(f, u, x, y, flip, t, scale = 1) {
   g.drawImage(im, fr * 16, u * 16, 16, 16, -8 * scale, -15 * scale, 16 * scale, 16 * scale); g.restore();
 }
 
+// sailing ship: side-on for east/west, bow-on for north/south
+function drawShip(x, y, dx, dy, t, scale = 1) {
+  if (!img.ship) return;
+  const col = Math.abs(dy) > Math.abs(dx) * 1.6 ? 0 : 1; const fr = Math.floor(t * 2) % 2;
+  g.save(); g.translate(x, y); if (dx < 0) g.scale(-1, 1);
+  g.drawImage(img.ship, col * 16, fr * 16, 16, 16, -8 * scale, -14 * scale, 16 * scale, 16 * scale); g.restore();
+}
+function pathLine(x, y, path, dest) {
+  g.beginPath(); g.moveTo(x, y);
+  for (const p of path || []) g.lineTo(p.x * T + 8, p.y * T + 8);
+  if (!path || !path.length) g.lineTo(dest.x * T + 8, dest.y * T + 8);
+  g.stroke();
+}
+
 // ---------- frame ----------
 function frame(now) {
   if (!root) return;
@@ -140,15 +175,30 @@ function clamp() {
   cam.y = vh >= MH ? MH / 2 : Math.max(vh / 2, Math.min(MH - vh / 2, cam.y));
 }
 function draw(t) {
-  buildTerrain(); buildOwners(); clamp();
+  invalidate(); clamp();
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.imageSmoothingEnabled = false;
   g.fillStyle = '#0d1820'; g.fillRect(0, 0, root._w, root._h);
   g.setTransform(cam.z * dpr, 0, 0, cam.z * dpr, (root._w / 2 - cam.x * cam.z) * dpr, (root._h / 2 - cam.y * cam.z) * dpr);
-  g.drawImage(terrainLayer, 0, 0); g.drawImage(ownerLayer, 0, 0);
+  const vw = root._w / cam.z, vh = root._h / cam.z, vx0 = cam.x - vw / 2, vy0 = cam.y - vh / 2;
+  const cs = CH * T;
+  for (let cy = Math.max(0, Math.floor(vy0 / cs)); cy <= Math.min(Math.ceil(W.h / CH) - 1, Math.floor((vy0 + vh) / cs)); cy++)
+    for (let cx = Math.max(0, Math.floor(vx0 / cs)); cx <= Math.min(Math.ceil(W.w / CH) - 1, Math.floor((vx0 + vw) / cs)); cx++) {
+      g.drawImage(terrainChunk(cx, cy), cx * cs, cy * cs); g.drawImage(ownerChunk(cx, cy), cx * cs, cy * cs);
+    }
+  const vis = (x, y, m = 3) => x * T > vx0 - m * T && x * T < vx0 + vw + m * T && y * T > vy0 - m * T && y * T < vy0 + vh + m * T;
   const now = W.year * 12 + W.month;
+  // harbours: a dock on the water, and a lighthouse at the bigger ports
+  for (const s of W.setts) {
+    if (!s.port || !s.dock || !vis(s.dock.x, s.dock.y)) continue;
+    const b = BUILDINGS['dock' + (s.id % 4)]; if (b) g.drawImage(img.buildings, b[0], b[1], b[2], b[3], s.dock.x * T - 8, s.dock.y * T - 8, 32, 32);
+    const r = W.realm(s.realmId);
+    if (!s.destroyed && r && r.capital === s.id && r.tier !== 'Village') { const L = BUILDINGS.lighthouse; g.drawImage(img.buildings, L[0], L[1], L[2], L[3], s.dock.x * T + 10, s.dock.y * T - 22, 16, 32); }
+  }
   // monster lairs
   for (const L of W.lairs) {
-    if (!L.alive || L.strength < 15) continue;
+    if (!L.alive || !vis(L.x, L.y)) continue;
+    if (L.cave) { const C = BUILDINGS.cave; g.drawImage(img.buildings, C[0], C[1], C[2], C[3], L.x * T - 4, L.y * T - 12, 24, 24); }
+    if (L.strength < 15) continue;
     const row = MONSTER_ROWS.indexOf(L.key); if (row < 0) continue;
     const s = L.key === 'dragon' ? 1.6 : 1 + Math.min(0.5, L.strength / 120);
     if (L.strength > 50) { g.fillStyle = `rgba(255,60,40,${0.18 + 0.12 * Math.sin(t * 4)})`; g.beginPath(); g.arc(L.x * T + 8, L.y * T + 6, 13 * s, 0, 7); g.fill(); }
@@ -157,6 +207,7 @@ function draw(t) {
   // settlements, drawn top to bottom
   const setts = [...W.setts].sort((a, b) => a.y - b.y);
   for (const s of setts) {
+    if (!vis(s.x, s.y)) continue;
     const name = settSprite(s); const r = W.realm(s.realmId);
     const h = name.startsWith('cap_') ? 44 : name.startsWith('town_') ? 32 : name === 'ruins' ? 20 : 22;
     drawBuilding(name, s.x * T + 8, s.y * T + 14, h);
@@ -172,10 +223,13 @@ function draw(t) {
     const att = W.realm(m.att), tgt = W.sett(m.target); if (!att || !tgt) continue;
     const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
     const mx = m.x * T + 8, my = m.y * T + 10;
-    g.strokeStyle = att.color; g.lineWidth = 1.5 / cam.z; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(mx, my); g.lineTo(tgt.x * T + 8, tgt.y * T + 8); g.stroke(); g.setLineDash([]);
-    const flip = tgt.x < m.x;
-    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(mx, my + 1, 18, 5, 0, 0, 7); g.fill();
-    offs.slice(0, 3).forEach((o, i) => drawUnitSprite(o.army.faction, o.army.unit, mx + (i - 1) * 11, my + (i % 2) * 4, flip, t + i * 0.3, 1.3));
+    g.strokeStyle = att.color; g.lineWidth = 1.5 / cam.z; g.setLineDash([4, 4]); pathLine(mx, my, m.path, tgt); g.setLineDash([]);
+    const nxt = m.path && m.path[0] || tgt; const flip = nxt.x < m.x;
+    if (m.atSea) { drawShip(mx, my, nxt.x - m.x, nxt.y - m.y, t, 1.6); drawShip(mx - 12, my + 6, nxt.x - m.x, nxt.y - m.y, t + 0.5, 1.2); }
+    else {
+      g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(mx, my + 1, 18, 5, 0, 0, 7); g.fill();
+      offs.slice(0, 3).forEach((o, i) => drawUnitSprite(o.army.faction, o.army.unit, mx + (i - 1) * 11, my + (i % 2) * 4, flip, t + i * 0.3, 1.3));
+    }
     g.fillStyle = att.color; g.fillRect(mx - 1, my - 34, 2, 16); g.fillRect(mx + (flip ? -11 : 1), my - 34, 10, 7);
     if (sel?.kind === 'march' && sel.war === w) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(mx, my - 6, 18, 0, 7); g.stroke(); }
   }
@@ -184,8 +238,10 @@ function draw(t) {
   for (const a of W.agents || []) {
     const mine = pr && a.owner === pr.id;
     if (W.hiddenKind(a) && !a.revealed && !mine) continue;
+    if (!vis(a.x, a.y)) continue;
     const ax = a.x * T + 8, ay = a.y * T + 10;
-    if (a.kind === 'rumor') {
+    if (a.atSea && a.kind !== 'rumor') { const nx = a.path && a.path[0]; drawShip(ax, ay, nx ? nx.x - a.x : 1, nx ? nx.y - a.y : 0, t + a.id * 0.2, 1); }
+    else if (a.kind === 'rumor') {
       g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(ax, ay - 10, 7, 5, 0, 0, 7); g.fill(); g.beginPath(); g.moveTo(ax - 2, ay - 6); g.lineTo(ax - 5, ay - 2); g.lineTo(ax + 1, ay - 6); g.fill();
       g.fillStyle = '#6b5226'; g.fillRect(ax - 4, ay - 11, 2, 2); g.fillRect(ax - 1, ay - 11, 2, 2); g.fillRect(ax + 2, ay - 11, 2, 2);
     } else {
@@ -206,17 +262,30 @@ function draw(t) {
   if (P && P.alive && P.x != null && (P.role === 'vagabond' || P.task)) {
     const px = P.x * T + 8, py = P.y * T + 10;
     const dest = P.task ? (P.task.lair ? W.lairs.find(l => l.id === P.task.lair) : P.task.bandit ? W.char(P.task.bandit) : W.sett(P.task.to)) : null;
-    if (dest) { g.strokeStyle = '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(px, py); g.lineTo(dest.x * T + 8, dest.y * T + 8); g.stroke(); g.setLineDash([]); }
+    if (dest) { g.strokeStyle = '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.setLineDash([3, 4]); pathLine(px, py, P.path, dest); g.setLineDash([]); }
     g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.ellipse(px, py + 1, 11, 4, 0, 0, 7); g.stroke();
     const f = P.army ? P.army.faction : P.culture, u = P.army ? P.army.unit : W.pickUnitView(P);
-    drawUnitSprite(f, u, px, py, dest ? dest.x < P.x : false, P.task ? t : 0, 1.4);
+    const nx = P.path && P.path[0] || dest;
+    if (P.atSea && nx) drawShip(px, py, nx.x - P.x, nx.y - P.y, t, 1.5);
+    else drawUnitSprite(f, u, px, py, nx ? nx.x < P.x : false, P.task ? t : 0, 1.4);
     g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(px - 11, py - 34, 22, 10); g.fillStyle = '#ffd76a'; g.fillText('You', px, py - 26);
   }
-  // labels
+  // labels: continents and islands when zoomed out, named wilds up close
+  g.textBaseline = 'middle'; g.textAlign = 'center';
+  if (cam.z < 1.15) for (const L of W.lands || []) {
+    if (L.kind === 'isle' || (L.kind === 'island' && cam.z < 0.7)) continue;
+    const size = L.kind === 'continent' ? 30 : 14; g.font = `italic 700 ${size}px Georgia, serif`;
+    g.lineWidth = 4; g.strokeStyle = 'rgba(16,12,8,.55)'; g.fillStyle = 'rgba(255,244,220,.85)';
+    g.strokeText(L.name.toUpperCase(), L.cx * T, L.cy * T); g.fillText(L.name.toUpperCase(), L.cx * T, L.cy * T);
+  }
+  if (cam.z >= 0.7) {
+    g.font = 'italic 9px Georgia, serif'; g.lineWidth = 3; g.strokeStyle = 'rgba(16,12,8,.7)'; g.fillStyle = '#e9dcb8';
+    for (const wd of W.wilds || []) { if (wd.size < 35 || !vis(wd.x, wd.y)) continue; const nm = wd.name[0].toUpperCase() + wd.name.slice(1); g.strokeText(nm, wd.x * T + 8, wd.y * T + 8); g.fillText(nm, wd.x * T + 8, wd.y * T + 8); }
+  }
   g.textBaseline = 'bottom';
   for (const r of W.realmList()) {
     if (r.tier === 'Village' && cam.z < 2.2) continue;
-    const s = W.sett(r.capital); if (!s) continue;
+    const s = W.sett(r.capital); if (!s || !vis(s.x, s.y)) continue;
     const war = W.wars.some(w => !w.over && (w.a === r.id || w.b === r.id));
     const label = (war ? '⚔ ' : '') + r.name;
     const size = r.tier === 'Kingdom' ? 11 : 9;
@@ -228,17 +297,22 @@ function draw(t) {
   }
   if (cam.z >= 2.2) {
     g.font = '7px sans-serif'; g.fillStyle = '#fff4dc';
-    for (const s of W.setts) { const r = W.realm(s.realmId); if (r && r.capital === s.id) continue; g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 2; g.strokeText(s.name, s.x * T + 8, s.y * T + 24); g.fillText(s.name, s.x * T + 8, s.y * T + 24); }
+    for (const s of W.setts) { const r = W.realm(s.realmId); if ((r && r.capital === s.id) || !vis(s.x, s.y)) continue; g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 2; g.strokeText(s.name, s.x * T + 8, s.y * T + 24); g.fillText(s.name, s.x * T + 8, s.y * T + 24); }
   }
 }
 function drawMini() {
   const MW = mini.width, MH = mini.height, sx = MW / (W.w * T), sy = MH / (W.h * T);
-  if (!mini._bg || mini._key !== terrainKey + ownerKey) {
-    mini._key = terrainKey + ownerKey;
-    const c = document.createElement('canvas'); c.width = MW; c.height = MH; const m = c.getContext('2d');
-    m.drawImage(terrainLayer, 0, 0, MW, MH); m.globalAlpha = 0.9; m.drawImage(ownerLayer, 0, 0, MW, MH); mini._bg = c;
+  if (!mini._bg) {
+    const c = document.createElement('canvas'); c.width = W.w; c.height = W.h; const m = c.getContext('2d'); const id = m.createImageData(W.w, W.h);
+    const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
+      let col = BCOL[W.grid[y][x]] || BCOL.plains; const o = ownerAt(x, y);
+      if (o) { const rc = hex(W.realm(o).color); col = col.map((v, k) => Math.round(v * 0.55 + rc[k] * 0.45)); }
+      const i = (y * W.w + x) * 4; id.data[i] = col[0]; id.data[i + 1] = col[1]; id.data[i + 2] = col[2]; id.data[i + 3] = 255;
+    }
+    m.putImageData(id, 0, 0); mini._bg = c;
   }
-  mg.drawImage(mini._bg, 0, 0);
+  mg.imageSmoothingEnabled = false; mg.drawImage(mini._bg, 0, 0, MW, MH);
   for (const w of W.wars) if (w.march) { mg.fillStyle = W.realm(w.march.att)?.color || '#fff'; mg.fillRect(w.march.x * T * sx - 2, w.march.y * T * sy - 2, 4, 4); }
   const vw = root._w / cam.z, vh = root._h / cam.z;
   mg.strokeStyle = '#ffd76a'; mg.lineWidth = 1.5; mg.strokeRect((cam.x - vw / 2) * sx, (cam.y - vh / 2) * sy, vw * sx, vh * sy);
@@ -251,16 +325,16 @@ function bind() {
     if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: cam.z }; } });
   canvas.addEventListener('pointermove', e => {
     const p = pts.get(e.pointerId); if (!p) return;
-    if (pts.size === 2 && pinch) { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, b] = [...pts.values()]; cam.z = Math.max(0.3, Math.min(5, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)); moved = true; return; }
+    if (pts.size === 2 && pinch) { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, b] = [...pts.values()]; cam.z = Math.max(0.5, Math.min(5, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)); moved = true; return; }
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) moved = true;
     if (moved) { cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   });
   const up = e => { const wasPinch = pts.size > 1; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!moved && !wasPinch && e.type === 'pointerup') tap(e); };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
-  canvas.addEventListener('wheel', e => { e.preventDefault(); cam.z = Math.max(0.3, Math.min(5, cam.z * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); cam.z = Math.max(0.5, Math.min(5, cam.z * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
   mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * W.w * T; cam.y = (e.clientY - r.top) / r.height * W.h * T; });
-  root.querySelector('[data-w=fit]').onclick = () => { const fitZ = Math.min(root._w / (W.w * T), root._h / (W.h * T)); if (cam.z > fitZ * 1.2) { cam.z = fitZ; cam.x = W.w * T / 2; cam.y = W.h * T / 2; } else { cam.z = 1.6; } };
+  root.querySelector('[data-w=fit]').onclick = () => { cam.z = cam.z > 0.8 ? 0.5 : 1.6; };
   root.querySelector('#wcard').addEventListener('click', e => {
     const t = e.target.closest('[data-wr],[data-wc],[data-wclose],[data-wact]'); if (!t) return;
     if (t.dataset.wact) { cb.act(JSON.parse(t.dataset.wact)); return; }
@@ -276,7 +350,7 @@ function tap(e) {
   let best = null, bd = reach * reach;
   const consider = (kind, x, y, obj) => { const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
   for (const w of W.wars) if (w.march) consider('march', w.march.x * T + 8, w.march.y * T + 2, { war: w });
-  for (const L of W.lairs) if (L.alive && L.strength >= 15) consider('lair', L.x * T + 8, L.y * T, { lair: L });
+  for (const L of W.lairs) if (L.alive && (L.strength >= 15 || L.cave)) consider('lair', L.x * T + 8, L.y * T, { lair: L });
   const prr = W.playerRealm && W.playerRealm();
   for (const a of W.agents || []) { if (W.hiddenKind(a) && !a.revealed && !(prr && a.owner === prr.id)) continue; consider('agent', a.x * T + 8, a.y * T + 4, { agent: a }); }
   for (const s of W.setts) consider('sett', s.x * T + 8, s.y * T + 4, { id: s.id });
@@ -292,14 +366,14 @@ function card() {
     box.innerHTML = `${close}<h3>${esc(s.name)}${s.destroyed ? ' (ruins)' : ''}</h3>
       <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
       ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
-      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span></div>`}
-      ${youVagabond() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${Math.max(1, Math.ceil(W.dist(s, W.player) / 3.4))} month(s)</button>` : ''}`;
+      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span>${s.port ? '<span class="tag">⚓ Port</span>' : ''}</div><div class="sub" style="margin-top:4px">${esc(W.landName(s))}${W.wildOf(s) ? ` · by ${esc(W.wildOf(s).name)}` : ''}</div>`}
+      ${youVagabond() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${(n => n + ' month' + (n === 1 ? '' : 's'))(W.tripMonths(W.player, s))}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
   } else if (sel.kind === 'march') {
     const m = sel.war.march; if (!m) { sel = null; return card(); }
     const att = W.realm(m.att), def = W.realm(m.def), tgt = W.sett(m.target);
     const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
     const total = offs.reduce((a, o) => a + o.army.size, 0);
-    const months = Math.ceil(Math.hypot(tgt.x - m.x, tgt.y - m.y) / (W.season === 'Winter' ? 1.6 : 3.2));
+    const months = W.tripMonths(m, tgt);
     box.innerHTML = `${close}<h3>⚔ Host of ${esc(att.name)}</h3><div class="sub">${total.toLocaleString()} troops marching on ${esc(tgt.name)} (${esc(def.name)}) · about ${months} month${months === 1 ? '' : 's'} away</div>
       <div class="wrow">${offs.map(o => `<button class="pill" data-wc="${o.id}">${esc(o.name)} · ${o.army.size} ${esc(W.plural(W.unitName(o.army)))}</button>`).join('')}</div>`;
   } else if (sel.kind === 'agent') {
@@ -316,7 +390,7 @@ function card() {
   } else if (sel.kind === 'lair') {
     const L = sel.lair; const danger = L.strength > 50 ? 'Ready to break out' : L.strength > 30 ? 'Growing restless' : 'Stirring';
     const nm = MON[L.key] ? MON[L.key].the : L.key;
-    box.innerHTML = `${close}<h3>Lair of ${esc(nm)}</h3><div class="sub">${danger} · strength ${Math.round(L.strength * L.base)}</div><div class="sub" style="margin-top:6px">Left alone, monsters grow until they break out and ravage nearby settlements. Heroes may slay, trap or tame them.</div>
+    box.innerHTML = `${close}<h3>${L.cave ? 'Cave' : 'Lair'} of ${esc(W.lairName(L))}</h3><div class="sub">${danger} · strength ${Math.round(L.strength * L.base)}</div><div class="sub" style="margin-top:6px">Left alone, monsters grow until they break out and ravage nearby settlements. Heroes may slay, trap or tame them.</div>
       ${youVagabond() ? `<div class="abtns">${['slay', 'trap', 'tame'].filter(a => a === 'slay' || (a === 'tame' ? MON[L.key].tame : !MON[L.key].rift && L.key !== 'dragon')).map(a => `<button class="abtn" data-wact='${JSON.stringify({ type: 'contract', kind: 'lair', id: L.id, approach: a })}'>${a[0].toUpperCase() + a.slice(1)} · ${Math.round(W.huntOdds(L, a) * 100)}%</button>`).join('')}</div>` : ''}`;
   }
 }

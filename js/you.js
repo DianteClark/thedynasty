@@ -103,7 +103,7 @@ function actions(w, p, r, rules) {
   if (p.role === 'vagabond') {
     const here = w.sett(p.settId);
     const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 5);
-    h += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Pick a destination here, or tap any settlement on the Map.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${Math.max(1, Math.ceil(w.dist(s, p) / 3.4))} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`;
+    h += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Pick a destination here, or tap any settlement on the Map.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripMonths(p, s)} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`;
     const cons = w.contractsHere();
     h += `<div class="card"><h3>⚔ Contracts</h3>${cons.length ? cons.map(c => {
       if (c.kind === 'bandit') return `<div class="arow"><div><b>${esc(c.label)}</b><div class="sub">Reward ~${c.reward} gold · odds ${pct(c.odds)} · fought on the battle map</div></div>${btn('Hunt', { type: 'contract', kind: 'bandit', id: c.id })}</div>`;
