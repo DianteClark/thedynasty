@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Dynasty</title>
+  <meta name="description" content="A living world sim: kingdoms, villages, vagabonds and dynasties that write their own history.">
+  <meta name="theme-color" content="#16120d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="The Dynasty">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>The Dynasty</h1>
+      <button class="icon-btn" id="btnWorld" aria-label="New world">⚙</button>
+    </div>
+    <div class="date"><span id="date">—</span><span class="season" id="season"></span></div>
+    <div class="controls">
+      <button id="btnPlay" class="ctl primary" aria-label="Play">▶</button>
+      <button id="btnYear" class="ctl">+1 yr</button>
+      <button id="btnTen" class="ctl">+10 yrs</button>
+      <button id="btnHundred" class="ctl">+100 yrs</button>
+    </div>
+    <div class="progress" id="progress" hidden><div id="progressBar"></div></div>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="chronicle" class="on"><span>📜</span>Chronicle</button>
+    <button data-tab="map"><span>🗺</span>Map</button>
+    <button data-tab="realms"><span>🏰</span>Realms</button>
+    <button data-tab="people"><span>👑</span>People</button>
+    <button data-tab="stats"><span>📊</span>Stats</button>
+  </nav>
+
+  <div class="sheet-wrap" id="sheetWrap" hidden>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <script type="module" src="js/ui.js"></script>
+</body>
+</html>
