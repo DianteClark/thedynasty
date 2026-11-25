@@ -99,3 +99,17 @@ The battle sandbox has moved to the Stats tab.
 - **Your children:** arrange matches with ruling houses (alliances while the couple lives; betrothals for the young), or send a child as a ward for ten years of peace.
 - **Peace terms:** offer peace, pay 100 gold, cede a holding, or send a child as a ward.
 - AI rulers now spend surplus gold on troops.
+
+## 0.7: agents on the map
+
+Everyone on a mission now travels the map, and can be stopped on the way.
+
+- **Spies** ride from their spymaster's seat to the enemy capital; they succeed, hang, get turned into double agents, or are ransomed when they arrive.
+- **Assassins** travel to their target. Plots against you arrive the same way: warnings come first if your spymaster is good, a vagabond who keeps moving can lose them, and a ruler can spot and seize them in their lands.
+- **Agitators** linger in a town for months, stoking unrest until they leave or are caught.
+- **Envoys** carry peace; a war ends when they arrive.
+- **Caravans** carry trade between capitals and allies, paying both. Bandits prey on them, and so can you.
+- **Rumors** visibly travel town to town.
+- Realms catch hidden agents crossing their lands (spymaster and captain help); for you, spotted agents glow red on the map and in your Intrigue card, ready to seize.
+- **Your intrigue (as a ruler):** send spies against enemies (improves your next battle), send agitators to rival towns, smear a rival (unless they are too sharp and earn the name Deaf Ears), or hire an assassin (if they talk, it means war).
+- **As a vagabond:** raid passing caravans for gold, at the cost of the owners' hatred and the name "the Brigand".

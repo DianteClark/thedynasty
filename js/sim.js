@@ -313,6 +313,8 @@ export class World {
     this.outlaws();
     this.warfare();
     this.intrigue();
+    this.caravans();
+    this.agentsTick();
     this.playerTick();
     this.monthlyLife();
     if (this.month === 6) this.tournaments();
@@ -581,7 +583,7 @@ export class World {
       else if (this.chance(0.3)) this.campaign(w, A, B);
       if (w.over) continue;
       const exhausted = w.months > 36 || Math.abs(w.score) > 8 || (w.months > 14 && this.chance(0.04));
-      if (exhausted) this.makePeace(w, A, B);
+      if (exhausted && !w.envoy) { w.envoy = true; const loser = w.score >= 0 ? B : A, winner = w.score >= 0 ? A : B; const e = this.spawnAgent('envoy', loser.id, this.sett(loser.capital), this.sett(winner.capital), { war: w.id }); if (!e) this.makePeace(w, A, B); }
     }
     this.wars = this.wars.filter(w => !w.over || w.endYear > this.year - 3);
   }
@@ -925,17 +927,13 @@ export class World {
       if (!A || !B) continue;
       const sm = this.spymaster(A), tm = this.spymaster(B); if (!sm) continue;
       this.stats.spies++;
-      const spyName = this.personName(cultureById(A.culture), this.chance(0.4));
-      const cover = this.pick(['a wine merchant', 'a pilgrim', 'a traveling minstrel', 'a stablehand', 'a scribe']);
-      const success = sm.stats.int + this.r() * 12 > (tm ? tm.stats.int : 5) + GUARD[this.guardSetting(B)].catch * 12;
-      if (success) {
-        w.intel[A.id] = (w.intel[A.id] || 0) + 0.2; this.gainXp(sm, 15);
-        if (this.chance(0.4)) this.log(1, 'spy', `A spy of ${A.name}, posing as ${cover}, slips into ${B.name} and returns with their battle plans.`, [sm.id]);
-      } else {
-        const fate = this.r(); const br = this.char(B.rulerId);
-        if (fate < 0.45) { this.log(1, 'spy', `${spyName}, a spy of ${A.name} disguised as ${cover}, is caught in ${B.name} and hanged at the gate.`, [br?.id].filter(Boolean)); if (br && this.has(br, 'cruel')) this.spreadRumor(br, 'butcher', 1); }
-        else if (fate < 0.75) { w.intel[B.id] = (w.intel[B.id] || 0) + 0.15; w.intel[A.id] = (w.intel[A.id] || 0) - 0.15; this.log(2, 'spy', `${tm ? this.fullName(tm) : B.name}'s spymaster catches ${spyName}, a spy of ${A.name}, and turns them. False plans now flow back to ${A.name}.`, [tm?.id, sm.id].filter(Boolean)); }
-        else { A.treasury -= 15; B.treasury += 15; this.log(1, 'spy', `${spyName}, caught spying for ${A.name}, is ransomed back for silver.`, []); }
+      const capA = this.sett(A.capital), capB = this.sett(B.capital);
+      this.spawnAgent('spy', A.id, capA, capB, { war: w.id, target: B.id, sm: sm.id, name: this.personName(cultureById(A.culture), this.chance(0.4)), cover: this.pick(['a wine merchant', 'a pilgrim', 'a traveling minstrel', 'a stablehand', 'a scribe']) });
+      // the bitterest rulers send agitators to stir up enemy towns
+      const ar = this.char(A.rulerId);
+      if (ar && !this.isPlayer(ar) && (this.has(ar, 'deceitful') || this.has(ar, 'cruel')) && this.chance(0.3)) {
+        const t = this.realmSetts(B).filter(s => s.id !== B.capital).sort((x, y) => y.unrest - x.unrest)[0];
+        if (t) this.agitate(A.id, t, ar);
       }
       // smear campaign: plant a false rumor about an enemy officer
       if (this.chance(0.2)) {
@@ -962,7 +960,7 @@ export class World {
             if (war) { const er = this.realm(war.a === myRealm.id ? war.b : war.a); const heir = er && this.char(er.heirId); target = heir && heir.alive && this.chance(0.5) ? heir : er && this.char(er.rulerId); motive = target && target.id === er?.heirId ? 'to end the enemy line' : 'to win the war'; }
           }
         }
-        if (target && target.alive && target.id !== p.id) { if (this.isPlayer(target)) this.plotAgainstPlayer(p, motive); else this.assassination(p, target, motive); }
+        if (target && target.alive && target.id !== p.id) { if (this.isPlayer(target)) this.plotAgainstPlayer(p, motive); else this.spawnAgent('assassin', p.realmId || target.realmId, this.sett(p.settId) || p, this.sett(target.settId) || this.sett(this.realm(target.realmId)?.capital), { by: p.id, target: target.id, motive, cover: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest']), culture: p.culture }); }
       }
     }
   }
@@ -991,7 +989,8 @@ export class World {
   }
   spreadRumor(c, kind, n) {
     c.rumors[kind] = (c.rumors[kind] || 0) + n;
-    const map = { butcher: 'the Butcher', merciful: 'the Merciful', oathbreaker: 'the Oathbreaker', traitor: 'the Traitor', kinslayer: 'the Kinslayer' };
+    if (n >= 2 && (this.agents || []).filter(a => a.kind === 'rumor').length < 12) { const from = this.sett(c.settId) || this.sett(this.realm(c.realmId)?.capital); const to = from && this.pick(this.setts.filter(s => !s.destroyed && this.dist(s, from) < 9 && s !== from)); if (from && to) this.spawnAgent('rumor', c.realmId, from, to, { about: c.id, text: kind, culture: c.culture }); }
+    const map = { butcher: 'the Butcher', merciful: 'the Merciful', oathbreaker: 'the Oathbreaker', traitor: 'the Traitor', kinslayer: 'the Kinslayer', brigand: 'the Brigand' };
     const title = map[kind];
     if (c.rumors[kind] >= 4 && c.titles.rep !== title && c.titles.rep !== 'Deaf Ears') {
       c.titles.rep = title;
@@ -1437,13 +1436,17 @@ export class World {
       }
     }
     for (const x of this.living()) if (x.companionOf === p.id) { x.x = p.x; x.y = p.y; x.settId = p.settId; if (p.realmId && x.realmId !== p.realmId && p.role !== 'vagabond') { x.realmId = p.realmId; if (x.role === 'vagabond') this.addOfficer(this.realm(p.realmId), x); } }
-    // plots against you
-    for (const plot of [...(this.plots || [])]) {
-      if (this.monthIndex < plot.due) continue;
-      this.plots.splice(this.plots.indexOf(plot), 1);
+    // companions grow closer on the road
+    for (const x of this.living()) if (x.companionOf === p.id && this.chance(0.5)) this.opine(x, p, 1);
+    // plots against you (most arrive as assassins on the map; a few strike from within)
+    for (const plot of [...(this.plots || [])]) if (!plot.agentId && this.monthIndex >= plot.due) this.resolvePlayerPlot(plot);
+  }
+  resolvePlayerPlot(plot) {
+    const p = this.player; if (!plot || !p) return;
+    { const i = (this.plots || []).indexOf(plot); if (i < 0) return; this.plots.splice(i, 1);
       const plotter = this.char(plot.by);
-      if (!p.alive || !plotter || !plotter.alive) continue;
-      if (plot.settId && p.settId !== plot.settId && p.role === 'vagabond') { this.you(`An assassin sent after you loses your trail.`, [], 2); continue; }
+      if (!p.alive || !plotter || !plotter.alive) return;
+      if (plot.settId && p.settId !== plot.settId && p.role === 'vagabond') { this.you(`An assassin sent after you loses your trail.`, [], 2); return; }
       const r = this.playerRealm();
       const guard = r && this.playerRules() ? this.guardSetting(r) : 'Light';
       const cpt = r && this.captain(r);
@@ -1464,8 +1467,11 @@ export class World {
     const sm = r ? this.spymaster(r) : null;
     const sense = (sm ? sm.stats.int : p.stats.int) + this.living().filter(x => x.companionOf === p.id).length * 2;
     const warned = this.chance(Math.min(0.9, 0.15 + sense * 0.035));
-    const plot = { by: plotter.id, due: this.monthIndex + this.ri(2, 5), warned, disguise: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest', 'a fellow traveler']), settId: p.settId };
+    const plot = { by: plotter.id, due: this.monthIndex + 99, warned, disguise: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest', 'a fellow traveler']), settId: p.settId };
     (this.plots || (this.plots = [])).push(plot);
+    const from = this.sett(plotter.settId) || this.sett(this.realm(plotter.realmId)?.capital) || this.pick(this.setts.filter(s => !s.destroyed));
+    const ag = this.spawnAgent('assassin', plotter.realmId, from, this.sett(p.settId) || this.sett(this.realm(p.realmId)?.capital), { by: plotter.id, target: p.id, plot, cover: plot.disguise, culture: plotter.culture, follow: p.role === 'vagabond' ? null : null });
+    if (ag) plot.agentId = ag.id; else plot.due = this.monthIndex + 3;
     if (warned) this.you(`${sm && sm.id !== p.id ? `Your spymaster ${sm.name} hears` : 'You hear'} whispers of a plot against your life${sense > 14 ? `. The trail leads to ${this.fullName(plotter)}` : ''}. ${this.playerRules() ? 'Tightening the guard may save you.' : 'Moving on may save you.'}`, sense > 14 ? [plotter.id] : [], 3);
   }
 
@@ -1795,6 +1801,178 @@ export class World {
     if (a.terms === 'ward') { const kid = this.char(a.kid); kid.wardOf = their.id; if (tr) this.opine(kid, tr, 20); cost = ` ${kid.name} goes to ${their.name} as a ward.`; }
     this.makePeace(w, this.realm(w.a), this.realm(w.b));
     this.you(`Peace with ${their.name}.${cost}`, [tr?.id].filter(Boolean), 2); return `Peace with ${their.name}.`;
+  }
+
+  // ---------- 0.7 agents: everyone who travels on a mission is on the map ----------
+  realmAt(x, y) {
+    let best = null, bd = 13.7;
+    for (const s of this.setts) { if (s.destroyed) continue; const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s; } }
+    const r = best && this.realm(best.realmId); return r && r.alive ? r : null;
+  }
+  spawnAgent(kind, owner, from, to, data = {}) {
+    if (!from || !to) return null;
+    const a = { id: this.id(), kind, owner, x: from.x, y: from.y, to: to.id, follow: data.follow || null, data, revealed: false, stay: data.stay || 0, born: this.monthIndex,
+      speed: { caravan: 2.2, envoy: 3.6, spy: 3.2, assassin: 3, agitator: 2.8, rumor: 4 }[kind] || 3, culture: data.culture || (this.realm(owner)?.culture) || 'aldmark' };
+    (this.agents || (this.agents = [])).push(a); return a;
+  }
+  agentLabel(a) {
+    return { spy: 'Spy', assassin: 'Assassin', envoy: 'Envoy', caravan: 'Caravan', agitator: 'Agitator', rumor: 'Rumor' }[a.kind];
+  }
+  hiddenKind(a) { return a.kind === 'spy' || a.kind === 'assassin' || a.kind === 'agitator'; }
+  agentsTick() {
+    for (const a of [...(this.agents || [])]) {
+      const dest = a.follow ? this.char(a.follow) : this.sett(a.to);
+      if (!dest || (a.follow && !dest.alive)) { this.removeAgent(a); continue; }
+      const here = this.realmAt(a.x, a.y);
+      // the realm whose lands they cross may catch them
+      if (this.hiddenKind(a) && here && here.id !== a.owner) {
+        const sm = this.spymaster(here), cpt = this.captain(here);
+        const pr = this.playerRealm();
+        if (pr && here.id === pr.id && this.playerRules()) {
+          if (!a.revealed && this.chance(0.1 + (sm ? sm.stats.int * 0.025 : 0))) { a.revealed = true; this.you(`Your ${sm && sm.id !== this.playerId ? 'spymaster spots' : 'people spot'} ${a.kind === 'assassin' ? 'an assassin' : a.kind === 'spy' ? 'a spy' : 'an agitator'} posing as ${a.data.cover || 'a traveler'} in your lands. Tap them on the map to seize them.`, [], 2); }
+        } else if (this.chance(0.02 + (sm ? sm.stats.int * 0.004 : 0) + (cpt ? cpt.stats.lea * 0.003 : 0))) {
+          this.log(1, 'spy', `${here.name} seizes ${a.kind === 'assassin' ? 'an assassin' : a.kind === 'spy' ? 'a spy' : 'an agitator'} of ${this.realm(a.owner)?.name || 'a rival'} on the road, posing as ${a.data.cover || 'a traveler'}.`, []);
+          this.agentCaught(a); continue;
+        }
+      }
+      // bandits prey on caravans
+      if (a.kind === 'caravan') {
+        const b = this.living().find(x => x.role === 'bandit' && this.dist(x, a) < 2.2);
+        if (b && this.chance(0.25)) { b.band += 4; b.fame += 3; this.log(1, 'bandit', `Bandits under ${this.fullName(b)} plunder a caravan of ${this.realm(a.owner)?.name || 'merchants'}.`, [b.id]); this.removeAgent(a); continue; }
+      }
+      if (a.stay > 0 && this.dist(a, dest) < 0.6) { this.agentStay(a, dest); continue; }
+      let sp = a.speed * (this.season === 'Winter' ? 0.65 : 1);
+      const d = Math.hypot(dest.x - a.x, dest.y - a.y);
+      if (d > sp) { a.x += (dest.x - a.x) / d * sp; a.y += (dest.y - a.y) / d * sp; continue; }
+      a.x = dest.x; a.y = dest.y;
+      if (a.stay > 0) { this.agentStay(a, dest); continue; }
+      this.agentArrive(a, dest);
+    }
+  }
+  removeAgent(a, keepPlot = false) { const i = (this.agents || []).indexOf(a); if (i >= 0) this.agents.splice(i, 1); if (keepPlot) return; const plot = (this.plots || []).find(p => p.agentId === a.id); if (plot) this.plots.splice(this.plots.indexOf(plot), 1); }
+  agentCaught(a) {
+    const plot = (this.plots || []).find(p => p.agentId === a.id);
+    if (plot) { const by = this.char(plot.by); this.stats.foiled++; if (by) { this.opine(this.player, by, -50); } }
+    if (a.kind === 'assassin' && a.data.by) { const by = this.char(a.data.by); if (by && this.isPlayer(by)) this.you(`Your assassin is caught on the road. If they talk, the world will know.`, [], 2); }
+    this.removeAgent(a);
+  }
+  agentStay(a, s) {
+    // agitators linger, stirring the people up
+    a.stay--; s.unrest += 3.5;
+    if (a.stay <= 0) { this.removeAgent(a); if (s.unrest > 60) this.log(1, 'uprising', `Agitators have left ${s.name} seething.`, []); }
+  }
+  agentArrive(a, dest) {
+    this.removeAgent(a, true);
+    const A = this.realm(a.owner);
+    if (a.kind === 'spy') return this.resolveSpy(a);
+    if (a.kind === 'assassin') {
+      const by = this.char(a.data.by), t = this.char(a.data.target);
+      if (!by || !t || !t.alive) return;
+      if (this.isPlayer(t)) return this.resolvePlayerPlot(a.data.plot);
+      if (this.dist(t, a) > 2.5) { if (this.isPlayer(by)) this.you(`Your assassin reaches ${dest.name || 'their mark'}, but ${t.name} is not there.`, [t.id], 1); return; }
+      return this.assassination(by, t, a.data.motive || 'for gold');
+    }
+    if (a.kind === 'envoy') { const w = this.wars.find(x => x.id === a.data.war); if (w && !w.over) this.makePeace(w, this.realm(w.a), this.realm(w.b)); return; }
+    if (a.kind === 'caravan') {
+      const B = this.realm(dest.realmId); const v = a.data.value || 30;
+      if (A && A.alive) A.treasury += v; if (B && B.alive && B !== A) B.treasury += Math.round(v * 0.6);
+      return;
+    }
+  }
+  resolveSpy(a) {
+    const w = this.wars.find(x => x.id === a.data.war); const A = this.realm(a.owner), B = this.realm(a.data.target);
+    if (!w || w.over || !A || !B || !A.alive || !B.alive) return;
+    const sm = this.char(a.data.sm) || this.spymaster(A), tm = this.spymaster(B);
+    const spyName = a.data.name, cover = a.data.cover;
+    const success = (sm ? sm.stats.int : 6) + this.r() * 12 > (tm ? tm.stats.int : 5) + GUARD[this.guardSetting(B)].catch * 12;
+    const mine = this.playerRealm() && this.playerRealm().id === A.id;
+    if (success) {
+      w.intel[A.id] = (w.intel[A.id] || 0) + 0.2; if (sm) this.gainXp(sm, 15);
+      if (mine) this.you(`${spyName}, your spy posing as ${cover}, returns from ${B.name} with their battle plans. Your next battle against them will go better.`, [], 2);
+      else if (this.chance(0.4)) this.log(1, 'spy', `A spy of ${A.name}, posing as ${cover}, slips into ${B.name} and returns with their battle plans.`, sm ? [sm.id] : []);
+    } else {
+      const fate = this.r(); const br = this.char(B.rulerId);
+      if (fate < 0.45) { this.log(mine ? 2 : 1, mine ? 'you' : 'spy', `${spyName}, a spy of ${A.name} disguised as ${cover}, is caught in ${B.name} and hanged at the gate.`, [mine ? this.playerId : null, br?.id].filter(Boolean)); if (br && this.has(br, 'cruel')) this.spreadRumor(br, 'butcher', 1); }
+      else if (fate < 0.75) { w.intel[B.id] = (w.intel[B.id] || 0) + 0.15; w.intel[A.id] = (w.intel[A.id] || 0) - 0.15; this.log(2, mine ? 'you' : 'spy', `${tm ? this.fullName(tm) : B.name} catches ${spyName}, a spy of ${A.name}, and turns them. False plans now flow back to ${A.name}.`, [mine ? this.playerId : null, tm?.id, sm?.id].filter(Boolean)); }
+      else { A.treasury -= 15; B.treasury += 15; this.log(1, mine ? 'you' : 'spy', `${spyName}, caught spying for ${A.name}, is ransomed back for silver.`, mine ? [this.playerId] : []); }
+    }
+  }
+  caravans() {
+    for (const r of this.realmList()) {
+      if (r.tier === 'Village' || !this.chance(0.05)) continue;
+      const cap = this.sett(r.capital); if (!cap) continue;
+      const partners = [...r.allies].map(id => this.realm(id)).filter(x => x && x.alive).map(x => this.sett(x.capital)).filter(Boolean);
+      const own = this.realmSetts(r).filter(s => s.id !== cap.id && this.dist(s, cap) > 4);
+      const to = partners.length && this.chance(0.6) ? this.pick(partners) : own.length ? this.pick(own) : null;
+      if (to) this.spawnAgent('caravan', r.id, cap, to, { value: Math.round(20 + this.realmPop(r) / 200), guards: this.ri(8, 20), cover: 'merchants' });
+    }
+  }
+  agitate(owner, s, by) {
+    const cul = this.realm(owner)?.culture || 'aldmark';
+    const from = this.sett(this.realm(owner)?.capital) || s;
+    return this.spawnAgent('agitator', owner, from, s, { stay: this.ri(4, 8), cover: this.pick(['a wandering preacher', 'a tax rebel', 'a ballad singer', 'a disgraced soldier']), by: by?.id, culture: cul });
+  }
+
+  // ---------- your intrigue ----------
+  act_spy(a) {
+    const r = this.playerRealm(), t = this.realm(a.realm); const w = this.wars.find(x => !x.over && ((x.a === r.id && x.b === t.id) || (x.b === r.id && x.a === t.id)));
+    if (!w) return 'Spies are sent against realms you are at war with.';
+    if (r.treasury < 20) return 'A spy costs 20 gold.';
+    r.treasury -= 20; this.stats.spies++;
+    const sm = this.spymaster(r);
+    this.spawnAgent('spy', r.id, this.sett(r.capital), this.sett(t.capital), { war: w.id, target: t.id, sm: sm?.id, name: this.personName(cultureById(r.culture), this.chance(0.4)), cover: this.pick(['a wine merchant', 'a pilgrim', 'a traveling minstrel', 'a stablehand', 'a scribe']) });
+    return `A spy rides for ${t.name}.`;
+  }
+  act_agitate(a) {
+    const r = this.playerRealm(), s = this.sett(a.sett); if (!s || s.realmId === r.id) return 'Not in your own lands.';
+    if (r.treasury < 40) return 'Agitators cost 40 gold.';
+    r.treasury -= 40; this.agitate(r.id, s, this.player); return `Your agitators set out for ${s.name}.`;
+  }
+  act_smear(a) {
+    const r = this.playerRealm(), t = this.char(a.id), p = this.player; if (!t || !t.alive) return 'They are gone.';
+    if (r.treasury < 30) return 'Spreading lies costs 30 gold.';
+    r.treasury -= 30;
+    const from = this.sett(r.capital); const to = this.sett(t.settId) || this.sett(this.realm(t.realmId)?.capital);
+    this.spawnAgent('rumor', r.id, from, to, { about: t.id, smear: true, text: `${t.name} butchered prisoners` });
+    const sm = this.spymaster(r);
+    if (t.stats.int > 13 && this.chance(0.5)) { t.titles.rep = 'Deaf Ears'; this.you(`You spread lies about ${this.fullName(t)}, who shrugs them off so completely that people start calling them Deaf Ears.`, [t.id], 2); }
+    else { this.spreadRumor(t, 'butcher', 3); this.you(`Your whisperers spread tales that ${this.fullName(t)} butchered prisoners.`, [t.id], 1); }
+    if (this.chance(0.25 - (sm ? sm.stats.int * 0.01 : 0))) { this.opine(t, p, -40); this.spreadRumor(p, 'traitor', 1); this.you(`${t.name} learns who spread the lies.`, [t.id], 2); }
+    return 'The rumor spreads.';
+  }
+  act_assassin(a) {
+    const r = this.playerRealm(), t = this.char(a.id), p = this.player; if (!t || !t.alive) return 'They are gone.';
+    if (r.treasury < 150) return 'An assassin costs 150 gold.';
+    r.treasury -= 150;
+    const to = this.sett(t.settId) || this.sett(this.realm(t.realmId)?.capital);
+    this.spawnAgent('assassin', r.id, this.sett(r.capital), to, { by: p.id, target: t.id, motive: 'on your orders', cover: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest']) });
+    this.you(`You pay an assassin to kill ${this.fullName(t)}. There is no taking it back.`, [], 2);
+    return 'The assassin sets out.';
+  }
+  act_seize(a) {
+    const ag = (this.agents || []).find(x => x.id === a.id); const r = this.playerRealm();
+    if (!ag || !ag.revealed) return 'They have slipped away.';
+    if (r.treasury < 10) return 'Sending soldiers costs 10 gold.';
+    r.treasury -= 10;
+    const cpt = this.captain(r);
+    if (this.chance(0.45 + (cpt ? cpt.stats.lea * 0.025 : this.player.stats.lea * 0.015))) {
+      const who = ag.kind === 'assassin' && ag.data.by ? this.char(ag.data.by) : null;
+      this.you(`Your soldiers seize ${ag.kind === 'assassin' ? 'the assassin' : ag.kind === 'spy' ? 'the spy' : 'the agitator'}${who ? `, who names ${this.fullName(who)}` : ''}.`, who ? [who.id] : [], 2);
+      if (who) this.opine(this.player, who, -60);
+      this.agentCaught(ag); return 'Seized.';
+    }
+    ag.revealed = false; return 'They slip through your fingers.';
+  }
+  act_raid(a) {
+    const p = this.player, ag = (this.agents || []).find(x => x.id === a.id && x.kind === 'caravan');
+    if (!ag || this.dist(ag, p) > 3) return 'The caravan is out of reach.';
+    const odds = Math.max(0.05, Math.min(0.95, (this.playerForce() / Math.max(1, ag.data.guards * 1.1)) ** 2 / (1 + (this.playerForce() / Math.max(1, ag.data.guards * 1.1)) ** 2)));
+    this.removeAgent(ag);
+    this.spreadRumor(p, 'brigand', 2);
+    const owner = this.realm(ag.owner); const ru = owner && this.char(owner.rulerId); if (ru) this.opine(ru, p, -30);
+    if (this.chance(odds)) { const g = ag.data.value * 2; p.gold = (p.gold || 0) + g; p.fame += 2; this.you(`You fall on a caravan of ${owner?.name || 'merchants'} and carry off ${g} gold.`, [], 2); return `${g} gold!`; }
+    const lost = Math.round((p.followers || 0) * 0.3); p.followers = Math.max(0, (p.followers || 0) - lost); p.wounded = 4;
+    this.you(`The caravan guards drive you off. ${lost} of your followers fall.`, [], 2); return 'The raid fails.';
   }
 
   // ---------- views ----------

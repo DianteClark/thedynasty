@@ -111,6 +111,8 @@ function actions(w, p, r, rules) {
     const recruits = w.living().filter(x => x.role === 'vagabond' && x.id !== p.id && !x.companionOf && w.dist(x, p) < 2).slice(0, 4);
     h += `<div class="card"><h3>🛡 Your band</h3><div class="sub">${p.followers || 0} sellswords. Hiring costs 6 gold a head.</div><div class="abtns">${btn('Hire 5', { type: 'hire', n: 5 })}${btn('Hire 10', { type: 'hire', n: 10 })}</div>
       ${recruits.length ? `<div class="sub" style="margin-top:8px">Wanderers here who might join you (20 gold to win them over):</div><div class="abtns">${recruits.map(v => btn(`${esc(v.name)} (Might ${v.stats.mig}, Int ${v.stats.int})`, { type: 'recruitCompanion', id: v.id })).join('')}</div>` : ''}</div>`;
+    const cars = (w.agents || []).filter(a => a.kind === 'caravan' && w.dist(a, p) <= 3);
+    if (cars.length) h += `<div class="card"><h3>💰 Caravans on the road</h3><div class="sub">Raiding pays well, but earns you a reputation and the owners' hatred.</div><div class="abtns">${cars.map(a => btn(`Raid ${esc(w.realm(a.owner)?.name || 'merchant')} caravan (~${a.data.value * 2}g, ${a.data.guards} guards)`, { type: 'raid', id: a.id })).join('')}</div></div>`;
     const lord = here && w.realm(here.realmId);
     h += `<div class="card"><h3>🏰 A place in the world</h3>
       ${lord && lord.tier !== 'Village' ? `<div class="arow"><div><b>Offer your sword to ${esc(lord.name)}</b><div class="sub">Become an officer with an army. Needs a name for yourself (fame and charisma).</div></div>${btn('Offer', { type: 'serve', realm: lord.id })}</div>` : '<div class="sub">No lord holds court here.</div>'}
@@ -134,7 +136,7 @@ function actions(w, p, r, rules) {
       <div class="chips">${['Light', 'Watchful', 'Locked Down'].map(l => `<button class="chip ${(r.guardChoice || 'Light') === l ? 'on' : ''}" data-act='${JSON.stringify({ type: 'guard', level: l })}'>${l}</button>`).join('')}</div>
       ${hire.length ? `<div class="sub" style="margin-top:6px">Wanderers who would serve you (40 gold):</div><div class="abtns">${hire.map(v => btn(`${esc(v.name)} (Lead ${v.stats.lea}, Might ${v.stats.mig})`, { type: 'recruit', id: v.id })).join('')}</div>` : ''}
       ${r.tier !== 'Village' ? `<div class="arow"><div><b>Host a tournament</b><div class="sub">80 gold. Fame, marriage offers, and a crowd an assassin could hide in.</div></div>${btn('Host', { type: 'tournament' })}</div>` : ''}</div>`;
-    h += council(w, r) + granaries(w, r) + armies(w, r) + family(w, p, r);
+    h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r) + family(w, p, r);
     h += `<div class="card"><h3>⚔ War and peace</h3>
       ${wars.map(x => { const o = w.realm(x.a === r.id ? x.b : x.a); const sc = x.a === r.id ? x.score : -x.score; return `<div class="arow"><div><b>At war with ${esc(o.name)}</b><div class="sub">${esc(x.reason)} · ${x.battles} battle(s) · ${sc > 0 ? 'you are winning' : sc < 0 ? 'you are losing' : 'evenly matched'}</div></div></div>
         <div class="abtns">${btn('Offer peace', { type: 'peaceTerms', realm: o.id, terms: 'white' })}${btn('Pay 100 gold', { type: 'peaceTerms', realm: o.id, terms: 'gold' })}${btn('Cede a holding', { type: 'peaceTerms', realm: o.id, terms: 'cede' }, 'data-confirm="Give up a holding for peace?"')}${btn('Send a child as ward', { type: 'peaceTerms', realm: o.id, terms: 'ward' })}</div>`; }).join('')}
@@ -200,4 +202,20 @@ function family(w, p, r) {
       ${matches.length ? `<div class="sub" style="margin-top:4px">Arrange a match with a ruling house (an alliance while they live):</div><div class="chips">${matches.map(m => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'arrange', child: k.id, match: m.k.id }))}'>${esc(m.k.name)} of ${esc(m.r.name)}</button>`).join('')}</div>` : ''}
       ${w.age(k) < 16 && !k.wardOf && others.length ? `<div class="sub" style="margin-top:4px">Send as a ward (ten years of peace with that realm):</div><div class="chips">${others.map(o => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'ward', child: k.id, realm: o.id }))}'>${esc(o.name)}</button>`).join('')}</div>` : ''}</div>`;
   }).join('')}</div>`;
+}
+
+function intrigue(w, p, r) {
+  const wars = w.wars.filter(x => !x.over && (x.a === r.id || x.b === r.id)).map(x => w.realm(x.a === r.id ? x.b : x.a)).filter(Boolean);
+  const rivals = w.neighbours(r, 10).filter(o => o.id !== r.id);
+  const targets = rivals.flatMap(o => [w.char(o.rulerId), w.char(o.heirId)]).filter((c, i, a) => c && c.alive && a.indexOf(c) === i).slice(0, 5);
+  const towns = rivals.flatMap(o => w.realmSetts(o).filter(s => s.id !== o.capital)).sort((a, b) => b.unrest - a.unrest).slice(0, 4);
+  const seen = (w.agents || []).filter(a => a.revealed && a.owner !== r.id && w.hiddenKind(a));
+  const mine = (w.agents || []).filter(a => a.owner === r.id && w.hiddenKind(a));
+  return `<div class="card"><h3>🗡 Intrigue</h3>
+    ${seen.length ? `<div class="sub"><b style="color:#ffb4a6">Enemy agents spotted in your lands:</b></div><div class="abtns">${seen.map(a => btn(`Seize the ${w.agentLabel(a).toLowerCase()} (${esc(a.data.cover || 'traveler')})`, { type: 'seize', id: a.id })).join('')}</div>` : '<div class="sub">No enemy agents spotted in your lands. A good spymaster spots more.</div>'}
+    ${mine.length ? `<div class="sub" style="margin-top:6px">Your agents abroad: ${mine.map(a => `${w.agentLabel(a)} → ${esc(w.sett(a.to)?.name || '?')}`).join(' · ')}</div>` : ''}
+    ${wars.length ? `<div class="sub" style="margin-top:8px">Send a spy (20 gold). A spy who returns improves your next battle against them:</div><div class="abtns">${wars.map(o => btn(esc(o.name), { type: 'spy', realm: o.id })).join('')}</div>` : ''}
+    ${towns.length ? `<div class="sub" style="margin-top:8px">Send agitators to a rival town (40 gold). They stir unrest for months:</div><div class="abtns">${towns.map(s => btn(`${esc(s.name)} (unrest ${Math.round(s.unrest)})`, { type: 'agitate', sett: s.id })).join('')}</div>` : ''}
+    ${targets.length ? `<div class="sub" style="margin-top:8px">Spread lies about a rival (30 gold), or hire an assassin (150 gold, and if they talk, it means war):</div>
+      ${targets.map(c => `<div class="abtns">${btn(`Smear ${esc(c.name)}`, { type: 'smear', id: c.id })}${btn(`Assassinate ${esc(c.name)}`, { type: 'assassin', id: c.id }, `data-confirm="Send an assassin after ${esc(c.name)}?"`)}</div>`).join('')}` : ''}</div>`;
 }

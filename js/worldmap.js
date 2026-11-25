@@ -179,6 +179,28 @@ function draw(t) {
     g.fillStyle = att.color; g.fillRect(mx - 1, my - 34, 2, 16); g.fillRect(mx + (flip ? -11 : 1), my - 34, 10, 7);
     if (sel?.kind === 'march' && sel.war === w) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(mx, my - 6, 18, 0, 7); g.stroke(); }
   }
+  // agents on the road
+  const pr = W.playerRealm && W.playerRealm();
+  for (const a of W.agents || []) {
+    const mine = pr && a.owner === pr.id;
+    if (W.hiddenKind(a) && !a.revealed && !mine) continue;
+    const ax = a.x * T + 8, ay = a.y * T + 10;
+    if (a.kind === 'rumor') {
+      g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(ax, ay - 10, 7, 5, 0, 0, 7); g.fill(); g.beginPath(); g.moveTo(ax - 2, ay - 6); g.lineTo(ax - 5, ay - 2); g.lineTo(ax + 1, ay - 6); g.fill();
+      g.fillStyle = '#6b5226'; g.fillRect(ax - 4, ay - 11, 2, 2); g.fillRect(ax - 1, ay - 11, 2, 2); g.fillRect(ax + 2, ay - 11, 2, 2);
+    } else {
+      const roles = a.kind === 'caravan' || a.kind === 'envoy' ? ['cav'] : ['inf', 'ranged'];
+      const u = Math.max(0, UNITS[a.culture].findIndex(x => x.entry && roles.includes(x.role)));
+      const dest = a.follow ? W.char(a.follow) : W.sett(a.to);
+      drawUnitSprite(a.culture, u, ax, ay, dest ? dest.x < a.x : false, t + a.id * 0.1, 0.9);
+      const col = { caravan: '#e9c46a', envoy: '#f4f1e6', spy: '#9aa4b0', assassin: '#e2553f', agitator: '#ff8a3d' }[a.kind];
+      g.fillStyle = col; g.strokeStyle = '#111'; g.lineWidth = 1 / cam.z;
+      if (a.kind === 'envoy') { g.fillRect(ax + 5, ay - 18, 1.5, 10); g.fillRect(ax + 6.5, ay - 18, 6, 4); }
+      else { g.beginPath(); g.arc(ax + 7, ay - 14, 3.2, 0, 7); g.fill(); g.stroke(); }
+      if (W.hiddenKind(a) && a.revealed && !mine) { g.strokeStyle = `rgba(226,85,63,${0.6 + 0.4 * Math.sin(t * 6)})`; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(ax, ay - 6, 12, 0, 7); g.stroke(); }
+    }
+    if (sel?.kind === 'agent' && sel.agent === a) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(ax, ay - 6, 14, 0, 7); g.stroke(); }
+  }
   // you
   const P = W.player;
   if (P && P.alive && P.x != null && (P.role === 'vagabond' || P.task)) {
@@ -255,6 +277,8 @@ function tap(e) {
   const consider = (kind, x, y, obj) => { const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
   for (const w of W.wars) if (w.march) consider('march', w.march.x * T + 8, w.march.y * T + 2, { war: w });
   for (const L of W.lairs) if (L.alive && L.strength >= 15) consider('lair', L.x * T + 8, L.y * T, { lair: L });
+  const prr = W.playerRealm && W.playerRealm();
+  for (const a of W.agents || []) { if (W.hiddenKind(a) && !a.revealed && !(prr && a.owner === prr.id)) continue; consider('agent', a.x * T + 8, a.y * T + 4, { agent: a }); }
   for (const s of W.setts) consider('sett', s.x * T + 8, s.y * T + 4, { id: s.id });
   sel = best; card();
 }
@@ -278,6 +302,17 @@ function card() {
     const months = Math.ceil(Math.hypot(tgt.x - m.x, tgt.y - m.y) / (W.season === 'Winter' ? 1.6 : 3.2));
     box.innerHTML = `${close}<h3>⚔ Host of ${esc(att.name)}</h3><div class="sub">${total.toLocaleString()} troops marching on ${esc(tgt.name)} (${esc(def.name)}) · about ${months} month${months === 1 ? '' : 's'} away</div>
       <div class="wrow">${offs.map(o => `<button class="pill" data-wc="${o.id}">${esc(o.name)} · ${o.army.size} ${esc(W.plural(W.unitName(o.army)))}</button>`).join('')}</div>`;
+  } else if (sel.kind === 'agent') {
+    const a = sel.agent; if (!(W.agents || []).includes(a)) { sel = null; return card(); }
+    const owner = W.realm(a.owner); const dest = a.follow ? W.char(a.follow) : W.sett(a.to);
+    const prr = W.playerRealm && W.playerRealm(); const mine = prr && a.owner === prr.id;
+    const what = { caravan: `A caravan of ${owner ? owner.name : 'merchants'} bound for ${dest?.name || '?'}, worth about ${a.data.value || 0} gold.`, envoy: `Envoys of ${owner?.name || '?'} riding to ${dest?.name || '?'} to sue for peace.`, spy: `${mine ? 'Your' : `A`} spy posing as ${a.data.cover}, heading for ${dest?.name || '?'}.`, assassin: `${mine ? 'Your' : 'An'} assassin posing as ${a.data.cover}, heading for ${dest?.name || '?'}.`, agitator: `${mine ? 'Your' : 'An'} agitator posing as ${a.data.cover}, stirring trouble at ${dest?.name || '?'}.`, rumor: `A rumor travels town to town${a.data.about && W.char(a.data.about) ? ` about ${W.char(a.data.about).name}` : ''}.` }[a.kind];
+    const P = W.player;
+    const canSeize = !mine && W.hiddenKind(a) && a.revealed && W.playerRules && W.playerRules();
+    const canRaid = a.kind === 'caravan' && P && P.alive && P.role === 'vagabond' && W.dist(a, P) <= 3;
+    box.innerHTML = `${close}<h3>${W.agentLabel(a)}</h3><div class="sub">${esc(what)}</div>
+      ${canSeize ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'seize', id: a.id })}'>Seize them (10 gold)</button>` : ''}
+      ${canRaid ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'raid', id: a.id })}'>Raid the caravan (${a.data.guards} guards)</button><div class="sub">Raiding makes you an outlaw in their eyes and earns a reputation.</div>` : ''}`;
   } else if (sel.kind === 'lair') {
     const L = sel.lair; const danger = L.strength > 50 ? 'Ready to break out' : L.strength > 30 ? 'Growing restless' : 'Stirring';
     const nm = MON[L.key] ? MON[L.key].the : L.key;
