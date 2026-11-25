@@ -76,6 +76,7 @@ export function installCourt(World) {
       const r = this.realm(j.realm); if (!r || !r.alive) continue;
       if (j.kind === 'reserve') { r.reserve = Math.min(this.reserveCap(r), (r.reserve || 0) + j.n); if (this.playerRealm() === r) this.you(`${j.n} new men march in to join your reserve.`, [], 1); }
       if (j.kind === 'garrison') { const s = this.sett(j.sett); if (s && s.realmId === r.id) { s.garrison = Math.min(this.garrisonCap(s), (s.garrison || 0) + j.n); if (this.playerRealm() === r) this.you(`The new garrison of ${s.name} is in place: ${s.garrison} on the walls.`, [], 1); } }
+      if (j.kind === 'gold') { r.treasury += j.n; continue; }
       if (j.kind === 'officer') { const o = this.char(j.id); if (o && o.alive && o.army && o.realmId === r.id) { o.army.size = Math.min(this.troopCap(o), o.army.size + j.n); if (this.playerRealm() === r) this.you(`${j.n} recruits reach ${o.name}'s army.`, [o.id], 1); } }
     }
   };

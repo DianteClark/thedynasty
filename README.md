@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.5
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.6
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -217,4 +217,13 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **Rulers and officers can travel** anywhere now, not just vagabonds.
 - **New tabs:** Map · Court (Camp if you don't rule) · Household (you, your family, your successor, your honour) · Chronicle · World (realms, people and stats).
 - **Portraits:** every character has a face from the HAS hero portrait sheets, matched to their culture and sex.
+
+## 2.6: road encounters and petitions
+
+Something now needs you every couple of minutes, wherever you are. Each one is a 📜 card with real consequences.
+
+- **On the road:** bandits demanding a toll (pay, fight, or lose a month going around), a wounded knight (nurse them and they may ride with you, or rob them and earn a name), travelers with news of far-off realms (or a rough map for a few coins), monster tracks to follow and mark, storms at sea, starving villages along the way.
+- **At court:** envoys offering alliance, the merchants' guild asking for a charter, a peasant accusing one of your officers, two officers feuding over the vanguard, a renowned wanderer asking to serve, a shrine for the people, refugees at the gate, a bandit chief offering to swear fealty.
+- **In camp:** a merchant hiring guards, a tavern brawl, dice by the fire, veterans offering to drill your troops, gifts from fellow officers, and, if you serve a lord, orders you can obey or refuse.
+- Your Charisma, Intellect and Might decide how some of them go.
 

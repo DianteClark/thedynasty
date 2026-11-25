@@ -446,7 +446,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v2.5. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.6. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 
@@ -494,6 +494,7 @@ function doAct(a) {
   world.lastPlayerDuel = null;
   const msg = world.act(a); save(); render(tab === 'map'); if (tab === 'map') refreshCard(); if (msg) toast(msg);
   if (!$('#sheetWrap').hidden && $('#sheet').dataset.kind === 'decisions') decisionsSheet();
+  if (world.pendingBattle && !busy) { busy = true; closeSheet(); resolvePending().then(() => { busy = false; }); }
   if (world.lastPlayerDuel && (a.type === 'challenge' || a.type === 'answer')) watchDuels([world.lastPlayerDuel], 'Your duel');
 }
 

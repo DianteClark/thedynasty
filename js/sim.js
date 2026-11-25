@@ -4,7 +4,8 @@ import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js
 import { Battle, UNITS, layoutBases, fieldFor, BASE_LAYOUTS, BASE_CAPS } from './battle.js';
 import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
 import { installKnowledge } from './know.js';
-import { installCourt, COURT_ACTS } from './court.js';
+import { installCourt, COURT_ACTS, HANDLERS } from './court.js';
+import { installEvents, resolveEvent } from './events.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -405,7 +406,7 @@ export class World {
     this.playerTick();
     this.monthlyLife();
     if (this.kn) this.knowledgeTick();
-    if (this.playerId) { this.jobsTick(); this.councilTick(); this.decisionsTick(); }
+    if (this.playerId) { this.jobsTick(); this.councilTick(); this.eventsTick(); this.decisionsTick(); }
     if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
@@ -1657,7 +1658,8 @@ export class World {
       else {
         const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
         let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
-        if (!advance(this, p, dest, sp, MOVE.sea)) {
+        if (p.delayed > 0) { p.delayed--; } // held up on the road this month
+        else if (!advance(this, p, dest, sp, MOVE.sea)) {
           const b = !p.atSea && this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
           if (b && !t.bandit && this.chance(0.06)) { p.task = null; this.you(`Bandits under ${this.fullName(b)} ambush you on the road!`, [b.id], 2); this.skirmish(b, true); }
         } else {
@@ -2330,3 +2332,5 @@ export class World {
 export { TROOP_TIERS, GUARD, MON };
 installKnowledge(World);
 installCourt(World);
+installEvents(World);
+HANDLERS.event = resolveEvent;
