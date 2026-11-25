@@ -1,8 +1,9 @@
 // Battle screen: setup, live battlefield (pan, pinch-zoom, minimap), orders, stratagem, results.
-import { Battle, FIELD, ROSTERS, ORDERS } from './battle.js';
+import { Battle, FIELD, ORDERS, UNITS } from './battle.js';
 import { CULTURES, cultureById } from './names.js';
 
-const FACTIONS = ['aldmark', 'ashborn', 'undying', 'sylvan', 'kharn', 'azure'];
+const FACTIONS = Object.keys(UNITS);
+const role = (f, u) => UNITS[f][u].role;
 const TERRAINS = ['plains', 'forest', 'swamp', 'wasteland', 'tundra', 'mountain'];
 const ROLE_LABEL = { inf: 'Infantry', heavy: 'Heavy', ranged: 'Ranged', magic: 'Casters', cav: 'Cavalry', flyer: 'Fliers' };
 const SIZES = { skirmish: 0.45, battle: 1, war: 1.6 };
@@ -14,7 +15,7 @@ function flipped(img) { const c = document.createElement('canvas'); c.width = im
 function loadAssets() {
   if (assetsReady) return assetsReady;
   assetsReady = (async () => {
-    unitNames = await (await fetch('assets/units/units.json')).json();
+    unitNames = Object.fromEntries(FACTIONS.map(f => [f, UNITS[f].map(u => u.name)]));
     await Promise.all(FACTIONS.map(async f => { const im = await loadImg(`assets/units/${f}.png`); images[f] = { r: im, l: flipped(im) }; }));
     images.ammo = await loadImg('assets/ammo.png');
     await Promise.all(TERRAINS.map(async t => { images['g_' + t] = await loadImg(`assets/ground/${t}.png`); }));
@@ -35,9 +36,9 @@ function makeOfficer(faction) {
   return { name, female, stats: { lea: st(), mig: st(), int: st(), cha: st() }, level: 1 + Math.floor(Math.random() * 6) };
 }
 function defaultPicks(f) {
-  const r = ROSTERS[f]; const pick = [];
+  const r = UNITS[f].map(u => u.role); const pick = [];
   const want = [['inf', 'heavy'], ['ranged', 'magic'], ['cav', 'flyer']];
-  for (const w of want) { const i = r.findIndex((x, k) => w.includes(x) && !pick.includes(k)); pick.push(i >= 0 ? i : 0); }
+  for (const w of want) { const i = r.findIndex((x, k) => w.includes(x) && UNITS[f][k].entry && !pick.includes(k)); const j = i >= 0 ? i : r.findIndex((x, k) => w.includes(x) && !pick.includes(k)); pick.push(j >= 0 ? j : 0); }
   return pick;
 }
 const officers = {};
@@ -62,35 +63,46 @@ export async function renderBattleSetup(view) {
     <p class="note">Unit art: HAS Creature Pack by Aleksandr Makarov. Next: battles started from the living world, with real officers and armies.</p>`;
 }
 function divisionPicker(i, u, off) {
-  const r = ROSTERS[setup.you];
-  return `<div class="card"><div style="display:flex;align-items:center;gap:10px">${spriteIcon(setup.you, u)}<div style="flex:1"><b>${esc(unitNames[setup.you][u])}</b> <span class="sub">${ROLE_LABEL[r[u]]} · tier ${u + 1}</span><div class="sub">Officer ${esc(off.name)} · Lead ${off.stats.lea} · Might ${off.stats.mig} · Int ${off.stats.int} · Cha ${off.stats.cha}</div></div></div>
+  const r = UNITS[setup.you].map(x => x.role);
+  return `<div class="card"><div style="display:flex;align-items:center;gap:10px">${spriteIcon(setup.you, u)}<div style="flex:1"><b>${esc(unitNames[setup.you][u])}</b> <span class="sub">${ROLE_LABEL[r[u]]}${UNITS[setup.you][u].entry ? '' : ' · upgraded'}</span><div class="sub">Officer ${esc(off.name)} · Lead ${off.stats.lea} · Might ${off.stats.mig} · Int ${off.stats.int} · Cha ${off.stats.cha}</div></div></div>
     <div class="chips" style="margin-top:8px">${r.map((role, k) => `<button class="chip ${k === u ? 'on' : ''}" data-div="${i}" data-unit="${k}">${esc(unitNames[setup.you][k])}</button>`).join('')}</div></div>`;
 }
 function spriteIcon(f, u) {
   return `<span style="width:40px;height:40px;flex:none;background:url(assets/units/${f}.png) 0 -${u * 40}px / 800px auto no-repeat;image-rendering:pixelated;display:inline-block"></span>`;
 }
 export function handleBattleSetupClick(t, view) {
-  if (t.dataset.bset) { setup[t.dataset.bset] = t.dataset.val; renderBattleSetup(view); return true; }
+  if (t.dataset.bset) { setup[t.dataset.bset] = t.dataset.val; if (t.dataset.bset === 'you' && setup.picks[setup.you]?.some(u => u >= UNITS[setup.you].length)) delete setup.picks[setup.you]; renderBattleSetup(view); return true; }
   if (t.dataset.div != null && t.dataset.unit != null) { setup.picks[setup.you][+t.dataset.div] = +t.dataset.unit; renderBattleSetup(view); return true; }
   if (t.id === 'startBattle') { startBattle(); return true; }
   return false;
 }
 
 // ---------- live battle ----------
-let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, canvas, g, mini, mg, groundCanvas, corpseCanvas, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
+let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, spectator = null, acc = 0, canvas, g, mini, mg, groundCanvas, corpseCanvas, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
 
 function startBattle() {
   const scale = SIZES[setup.size];
   const youPicks = setup.picks[setup.you];
   const foePicks = defaultPicks(setup.foe);
   const counts = [350, 250, 160].map(n => Math.round(n * scale));
-  const mkSide = (faction, picks, offs, name, color, ai) => ({ faction, name, color, ai, divisions: picks.map((u, i) => ({ unit: u, count: Math.max(30, Math.round(counts[i] * (ROSTERS[faction][u] === 'cav' || ROSTERS[faction][u] === 'heavy' ? 0.8 : 1) * (1 - u * 0.05))), level: offs[i].level, officer: offs[i] })) });
+  const mkSide = (faction, picks, offs, name, color, ai) => ({ faction, name, color, ai, divisions: picks.map((u, i) => ({ unit: u, count: Math.max(30, Math.round(counts[i] * (role(faction, u) === 'cav' || role(faction, u) === 'heavy' ? 0.8 : 1) * (UNITS[faction][u].entry ? 1 : 0.75))), level: offs[i].level, officer: offs[i] })) });
   B = new Battle({ seed: Math.floor(Math.random() * 1e9), terrain: setup.terrain, sides: [
     mkSide(setup.you, youPicks, officersFor('you', setup.you), `Your army`, '#4fa3ff', null),
     mkSide(setup.foe, foePicks, officersFor('foe', setup.foe), `The ${cultureById(setup.foe).name} host`, '#ff5a4a', setup.ai),
-  ] }, unitNames);
+  ] });
   for (const k of Object.keys(officers)) delete officers[k]; // fresh officers next time
+  spectator = null;
   buildScreen();
+}
+
+// Watch a battle from the living world: both sides are led by their own generals.
+export async function watchBattle(cfg, info, onDone) {
+  await loadAssets();
+  B = new Battle(cfg);
+  spectator = { info, onDone };
+  toasts = [];
+  buildScreen();
+  toasts.push({ text: info.title, cls: 'strat', at: performance.now() + 3000 });
 }
 
 function buildScreen() {
@@ -101,7 +113,7 @@ function buildScreen() {
       <div class="bspeed">${[['pause', '❚❚'], ['1', '1×'], ['2', '2×'], ['4', '4×']].map(([k, l]) => `<button class="bbtn ${k === '1' ? 'on' : ''}" data-b="speed" data-v="${k}">${l}</button>`).join('')}</div></div>
     <div class="btoasts" id="btoasts"></div>
     <canvas class="bmini" width="160" height="100"></canvas>
-    <button class="bbtn fire" data-b="fire">🔥 Fire volley</button>
+    ${spectator ? '<button class="bbtn fire" data-b="skip">⏭ Skip to the end</button>' : '<button class="bbtn fire" data-b="fire">🔥 Fire volley</button>'}
     <div class="bdivs" id="bdivs"></div>
     <div class="border" id="border" hidden></div>
     <div class="bresult" id="bresult" hidden></div>`;
@@ -110,10 +122,10 @@ function buildScreen() {
   mini = root.querySelector('.bmini'); mg = mini.getContext('2d');
   buildGround();
   const fit = () => { const dpr = Math.min(2, window.devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; cam.dpr = dpr; };
-  cam = { x: 300, y: FIELD.h / 2, z: 1.5, dpr: 1 };
+  cam = spectator ? { x: FIELD.w / 2, y: FIELD.h / 2, z: Math.max(0.35, innerWidth / FIELD.w * 1.05), dpr: 1 } : { x: 300, y: FIELD.h / 2, z: 1.5, dpr: 1 };
   fit(); window.addEventListener('resize', fit); root._fit = fit;
   bindInput();
-  seenEvents = 0; sel = null; targeting = false; speed = 1; paused = false; lastT = performance.now(); toasts = [];
+  seenEvents = 0; sel = null; targeting = false; speed = 1; paused = false; lastT = performance.now(); acc = 0; if (!spectator) toasts = [];
   renderDivCards();
   raf = requestAnimationFrame(frame);
 }
@@ -130,7 +142,7 @@ function buildGround() {
 
 function frame(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
-  if (!paused && !B.over) { const steps = speed; for (let i = 0; i < steps; i++) B.step(dt); }
+  if (!paused && !B.over) { acc += dt * speed; let n = 0; while (acc >= 1 / 30 && n++ < 16) { B.step(1 / 30); acc -= 1 / 30; } if (n >= 16) acc = 0; }
   // bake finished deaths into the corpse layer
   if (B.corpses.length) { const cg = corpseCanvas.getContext('2d'); cg.globalAlpha = 0.85; for (const s of B.corpses) drawUnit(cg, s, 1, 4, 3); cg.globalAlpha = 1; B.corpses.length = 0; }
   draw(); drawMini(); hud();
@@ -186,7 +198,8 @@ function draw() {
   // officers with banners
   for (const div of B.divisions) {
     const o = div.officer; if (!o.alive || o.captured || B.aliveCount(div) <= 0) continue;
-    const fake = { x: o.x, y: o.y, div: { faction: div.faction, unit: 6 }, flip: div.facing < 0, at: B.t * 4, anim: 0 };
+    if (div.eliteUnit == null) { let u = div.unit; for (let i = 0; i < 6 && UNITS[div.faction][u].up != null; i++) u = UNITS[div.faction][u].up; div.eliteUnit = u; }
+    const fake = { x: o.x, y: o.y, div: { faction: div.faction, unit: div.eliteUnit }, flip: div.facing < 0, at: B.t * 4, anim: 0 };
     g.fillStyle = div.color; g.fillRect(o.x - 1, o.y - 34, 2, 22); g.fillRect(o.x + (div.facing < 0 ? -11 : 1), o.y - 34, 10, 7);
     drawUnit(g, fake, 1.3);
     if (cam.z > 0.7) { g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.fillStyle = 'rgba(0,0,0,.6)'; g.fillText(o.name, o.x + 0.5, o.y + 9.5); g.fillStyle = '#fff'; g.fillText(o.name, o.x, o.y + 9); }
@@ -218,7 +231,7 @@ function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `
 let lastCards = 0;
 function hud() {
   root.querySelector('#btime').textContent = fmt(B.t);
-  const fb = root.querySelector('[data-b=fire]'); fb.disabled = B.sides[0].fireUsed; fb.classList.toggle('on', targeting); fb.textContent = targeting ? 'Tap the map to aim…' : B.sides[0].fireUsed ? '🔥 Volley spent' : '🔥 Fire volley';
+  const fb = root.querySelector('[data-b=fire]'); if (fb) { fb.disabled = B.sides[0].fireUsed; fb.classList.toggle('on', targeting); fb.textContent = targeting ? 'Tap the map to aim…' : B.sides[0].fireUsed ? '🔥 Volley spent' : '🔥 Fire volley'; }
   while (seenEvents < B.events.length) { const e = B.events[seenEvents++]; if (e.t > 0.1) toast(e); }
   const tb = root.querySelector('#btoasts'); const now = performance.now();
   toasts = toasts.filter(t => now - t.at < 5000); tb.innerHTML = toasts.slice(-4).map(t => `<div class="btoast ${t.cls}">${esc(t.text)}</div>`).join('');
@@ -226,14 +239,18 @@ function hud() {
   if (B.over && root.querySelector('#bresult').hidden) showResult();
 }
 function toast(e) {
+  if (spectator) { toasts.push({ text: e.text, cls: e.kind === 'strat' ? 'strat' : '', at: performance.now() }); return; }
   const mine = e.side === 0; let cls = '';
   if (e.kind === 'bad') cls = mine ? 'bad' : 'good'; else if (e.kind === 'good') cls = mine ? 'good' : 'bad'; else if (e.kind === 'strat') cls = 'strat';
   toasts.push({ text: e.text, cls, at: performance.now() });
 }
 function renderDivCards() {
   const box = root.querySelector('#bdivs');
-  box.innerHTML = B.divisions.filter(d => d.side === 0).map(d => {
+  const showSides = spectator ? [0, 1] : [0];
+  box.classList.toggle('two', !!spectator);
+  box.innerHTML = B.divisions.filter(d => showSides.includes(d.side)).map(d => {
     const alive = B.aliveCount(d); const st = d.routed ? 'Routing!' : alive <= 0 ? 'Destroyed' : d.pending ? `Messenger: ${ORDERS[d.pending.order]} (${Math.max(0, d.pending.eta - B.t).toFixed(0)}s)` : ORDERS[d.state] || d.state;
+    if (spectator) return `<button class="bdiv mini ${d.routed ? 'rout' : ''}" data-b="sel" data-id="${d.id}" style="border-top:3px solid ${d.color}"><span class="bdname">${esc(d.unitName)}</span><span class="bdcount">${alive}</span><span class="bmor"><i style="width:${Math.max(0, Math.min(100, d.morale))}%;background:${d.morale < 30 ? '#e2553f' : d.morale < 55 ? '#e0b040' : '#6fbf73'}"></i></span></button>`;
     return `<button class="bdiv ${d === sel ? 'on' : ''} ${d.routed ? 'rout' : ''}" data-b="sel" data-id="${d.id}">
       <span class="bdname">${esc(d.unitName)}</span><span class="bdcount">${alive}</span>
       <span class="bmor"><i style="width:${Math.max(0, Math.min(100, d.morale))}%;background:${d.morale < 30 ? '#e2553f' : d.morale < 55 ? '#e0b040' : '#6fbf73'}"></i></span>
@@ -241,6 +258,7 @@ function renderDivCards() {
   }).join('');
 }
 function openOrders(div) {
+  if (spectator) return;
   sel = div; const box = root.querySelector('#border');
   if (div.routed || B.aliveCount(div) <= 0) { box.hidden = true; return; }
   box.hidden = false;
@@ -251,9 +269,9 @@ function openOrders(div) {
 function showResult() {
   const sum = B.summary(); const box = root.querySelector('#bresult'); box.hidden = false;
   const won = B.winner === 0;
-  box.innerHTML = `<h2>${won ? 'Victory' : 'Defeat'}</h2><div class="sub">${esc(B.events[B.events.length - 1].text)} Battle lasted ${fmt(B.t)}.</div>
+  box.innerHTML = `<h2>${spectator ? esc(B.sides[B.winner].name) + ' wins' : won ? 'Victory' : 'Defeat'}</h2><div class="sub">${esc(B.events[B.events.length - 1].text)} Battle lasted ${fmt(B.t)}.</div>
     ${sum.map(s => `<h3 style="color:${s.color}">${esc(s.name)}</h3>${s.divisions.map(d => `<div class="bres"><b>${esc(d.unit)}</b> under ${esc(d.officer)} <span class="sub">(${d.fate})</span><div class="sub">${d.left} of ${d.start} standing · ${d.dead} fallen${d.routed ? ' · routed' : ''}${d.rallied ? ' · rallied once' : ''}</div></div>`).join('')}`).join('')}
-    <button class="btn" data-b="again">Fight another battle</button><button class="btn ghost" data-b="exit">Back to the world</button>`;
+    ${spectator ? '<button class="btn" data-b="done">Continue the chronicle</button>' : '<button class="btn" data-b="again">Fight another battle</button><button class="btn ghost" data-b="exit">Back to the world</button>'}`;
 }
 
 function bindInput() {
@@ -276,7 +294,9 @@ function bindInput() {
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-b]'); if (!t) return;
     const b = t.dataset.b;
-    if (b === 'exit') return exitBattle();
+    if (b === 'exit') { if (spectator) { skipToEnd(); return; } return exitBattle(); }
+    if (b === 'skip') return skipToEnd();
+    if (b === 'done') { const sp = spectator, bb = B; exitBattle(); spectator = null; sp.onDone(bb); return; }
     if (b === 'again') { exitBattle(); return startBattle(); }
     if (b === 'speed') { root.querySelectorAll('[data-b=speed]').forEach(x => x.classList.toggle('on', x === t)); if (t.dataset.v === 'pause') paused = true; else { paused = false; speed = +t.dataset.v; } }
     if (b === 'fire' && !B.sides[0].fireUsed) { targeting = !targeting; }
@@ -293,6 +313,7 @@ function tapAt(x, y) {
   for (const d of B.divisions) { if (d.side !== 0 || B.aliveCount(d) <= 0) continue; for (const s of d.soldiers) { if (!s.alive || s.fled) continue; const dd = (s.x - w.x) ** 2 + (s.y - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } } }
   if (best) openOrders(best); else if (sel) { sel = null; root.querySelector('#border').hidden = true; }
 }
+function skipToEnd() { let n = 0; while (!B.over && n++ < 40000) B.step(1 / 30); }
 function exitBattle() {
   cancelAnimationFrame(raf); window.removeEventListener('resize', root._fit); root.remove(); document.body.classList.remove('in-battle'); B = null;
 }

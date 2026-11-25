@@ -1,6 +1,7 @@
 // The Dynasty — living world simulation (prototype).
 // Runs month by month. Everything that happens is written to the Chronicle.
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
+import { Battle, UNITS } from './battle.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -181,7 +182,7 @@ export class World {
       const cap = this.makeChar({ culture: s.culture, age: this.ri(25, 45), role: 'merc' });
       cap.settId = s.id;
       const name = `The ${this.pick(['Black', 'Crimson', 'Iron', 'Free', 'Grey', 'Golden', 'Broken'])} ${this.pick(['Company', 'Lances', 'Blades', 'Banners', 'Hounds', 'Shields'])}`;
-      this.mercs.push({ id: this.id(), name, captainId: cap.id, size: this.ri(150, 400), level: this.ri(2, 5), employer: null, wage: 0, until: 0 });
+      this.mercs.push({ id: this.id(), name, captainId: cap.id, size: this.ri(150, 400), level: this.ri(2, 5), employer: null, wage: 0, until: 0, faction: cap.culture, unit: this.pickUnit(cap, cap.culture) });
       cap.mercId = this.mercs[this.mercs.length - 1].id;
     }
     this.updateTiers(true);
@@ -244,7 +245,23 @@ export class World {
     ruler.army = this.newArmy(ruler, r.setts.size >= 3 ? 1 : 0.35);
     this.pickHeir(r);
   }
-  newArmy(c, scale = 1) { return { size: Math.round((80 + c.stats.lea * 18) * scale), level: this.ri(1, 3), xp: 0, wins: 0, losses: 0 }; }
+  newArmy(c, scale = 1, faction = c.culture) { return { size: Math.round((80 + c.stats.lea * 18) * scale), level: this.ri(1, 3), xp: 0, wins: 0, losses: 0, faction, unit: this.pickUnit(c, faction) }; }
+  pickUnit(c, faction) {
+    // officers raise troops that suit them: leaders ride, thinkers shoot or cast, fighters hold the line
+    const units = UNITS[faction].map((u, i) => ({ ...u, i })).filter(u => u.entry);
+    const s = c.stats; const pref = s.lea >= s.mig && s.lea >= s.int ? ['cav', 'flyer'] : s.int > s.mig ? ['ranged', 'magic'] : ['inf', 'heavy'];
+    const fit = units.filter(u => pref.includes(u.role));
+    return this.pick(fit.length ? fit : units).i;
+  }
+  unitName(a) { return a && a.faction && UNITS[a.faction][a.unit] ? UNITS[a.faction][a.unit].name : 'troops'; }
+  plural(n) {
+    if (/man$/.test(n)) return n.replace(/man$/, 'men');
+    if (/(Deer|Djinn|Naga)$/.test(n)) return n;
+    if (/Dwarf$/.test(n)) return n.replace(/Dwarf$/, 'Dwarves');
+    if (/[^aeiou]y$/.test(n)) return n.slice(0, -1) + 'ies';
+    if (/(ch|sh|s|x)$/.test(n)) return n + 'es';
+    return n + 's';
+  }
   addOfficer(r, c) {
     c.role = 'officer'; c.realmId = r.id; c.liegeId = r.rulerId; c.settId = r.capital; c.loyalty = this.ri(45, 85);
     if (!c.army) c.army = this.newArmy(c, r.tier === 'Village' ? 0.4 : 1);
@@ -292,6 +309,11 @@ export class World {
     this.monthlyLife();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
+    if (this.pendingBattle && this.pendingBattle.replay) {
+      // a battle the player watched: fight it again, step for step, so the world stays the same
+      const b = new Battle(this.pendingBattle.cfg); let n = 0; while (!b.over && n++ < 40000) b.step(1 / 30);
+      const ctx = this.pendingBattle; this.pendingBattle = null; ctx.watched = true; this.applyBattle(ctx, b);
+    }
   }
   runYears(n) { for (let i = 0; i < n * 12; i++) this.tick(); }
 
@@ -398,7 +420,7 @@ export class World {
       const nr = this.makeRealm(s, leader.id);
       nr.dynasty = leader.dynasty || this.dynastyName(); leader.dynasty = nr.dynasty;
       leader.role = 'ruler'; leader.realmId = nr.id; leader.settId = s.id; leader.fame += 15;
-      leader.army = { size: Math.round(rebels * 0.6), level: 1, xp: 0, wins: 1, losses: 0 };
+      leader.army = { size: Math.round(rebels * 0.6), level: 1, xp: 0, wins: 1, losses: 0, faction: leader.culture, unit: this.pickUnit(leader, leader.culture) };
       s.unrest = 20; this.stats.realmsRisen++;
       if (ruler) this.opine(leader, ruler, -60);
       this.log(3, 'uprising', `${s.name} rises in revolt over ${cause}. Led by ${this.fullName(leader)}${leader.role === 'ruler' && leader.fame > 20 ? ', a wanderer of some renown,' : ''}, the rebels ${def ? `rout ${this.fullName(def)} and ` : ''}throw off the rule of ${r.name}.`, [leader.id, def?.id, ruler?.id].filter(Boolean));
@@ -488,7 +510,7 @@ export class World {
         if (r && r.setts.size === 1 && c.band > 45 && this.chance(0.25) && s.id === r.capital) {
           const old = this.char(r.rulerId);
           if (old && old.alive) this.die(old, `slain by the bandit ${c.name}`);
-          r.rulerId = c.id; c.role = 'ruler'; c.realmId = r.id; c.dynasty = c.dynasty || this.dynastyName(); r.dynasty = c.dynasty; c.army = { size: c.band * 2, level: 2, xp: 0, wins: 1, losses: 0 };
+          r.rulerId = c.id; c.role = 'ruler'; c.realmId = r.id; c.dynasty = c.dynasty || this.dynastyName(); r.dynasty = c.dynasty; c.army = { size: c.band * 2, level: 2, xp: 0, wins: 1, losses: 0, faction: c.culture, unit: this.pickUnit(c, c.culture) };
           this.stats.realmsRisen++;
           this.log(3, 'rise', `The bandit chief ${this.fullName(c)} storms ${s.name}, kills ${old ? this.fullName(old) : 'its headman'} and makes the village their own.`, [c.id, old?.id].filter(Boolean));
         } else if (this.chance(0.1)) this.log(1, 'bandit', `Bandits under ${this.fullName(c)} raid ${s.name}.`, [c.id]);
@@ -567,8 +589,11 @@ export class World {
   }
 
   campaign(w, A, B) {
-    const attackerIsA = w.score >= 0 ? this.chance(0.6) : this.chance(0.4);
+    const sa = this.realmStrength(A), sb = this.realmStrength(B);
+    const attackerIsA = this.chance(sa >= sb ? 0.75 : 0.25);
     const att = attackerIsA ? A : B, def = attackerIsA ? B : A;
+    const sAtt = attackerIsA ? sa : sb, sDef = attackerIsA ? sb : sa;
+    if (sAtt < sDef * 0.35) return; // no sane general marches out this outnumbered
     // mercenaries may be bought out
     for (const mid of [...att.mercs]) {
       const m = this.mercs.find(x => x.id === mid);
@@ -582,11 +607,15 @@ export class World {
     if (!aOff.length) return;
     const targets = this.realmSetts(def).sort((x, y) => Math.min(...this.realmSetts(att).map(s => this.dist(s, x))) - Math.min(...this.realmSetts(att).map(s => this.dist(s, y))));
     const target = targets[0]; if (!target) { w.over = true; return; }
-    const res = this.battle(att, def, aOff, dOff, target, w);
+    this.battle(att, def, aOff, dOff, target, w, attackerIsA);
+  }
+
+  afterBattle(ctx, res) {
+    const { att, def, target, war: w, attackerIsA, dOff } = ctx;
     w.battles++;
     w.score += (res.attackerWon ? 1 : -1) * (attackerIsA ? 1 : -1) * (res.decisive ? 2 : 1);
+    if (!att.alive || !def.alive || target.realmId !== def.id) return;
     if (res.attackerWon && (dOff.length === 0 || this.chance(0.5))) {
-      // siege falls
       const wasCap = target.id === def.capital;
       this.joinRealm(target, att); target.unrest += 30;
       const attRuler = this.char(att.rulerId);
@@ -603,21 +632,20 @@ export class World {
 
   moveCapital(r) {
     const s = this.realmSetts(r).sort((a, b) => b.pop - a.pop)[0];
-    if (s) { r.capital = s.id; r.name = r.name; }
+    if (s) r.capital = s.id;
   }
 
-  battle(att, def, aOff, dOff, target, war) {
-    this.stats.battles++;
-    const names = [];
-    const terrain = target.biome;
+  // ---------- battles: fought on the battle engine ----------
+  generalStyle(c) { return !c ? 'balanced' : this.has(c, 'reckless') || this.has(c, 'brave') ? 'reckless' : this.has(c, 'cautious') ? 'cautious' : 'balanced'; }
+  battle(att, def, aOff, dOff, target, war, attackerIsA) {
     const lines = [];
-    // pre-battle duel
+    let duelSide = null;
     if (aOff.length && dOff.length && this.chance(0.3)) {
       const c1 = this.pick(aOff), c2 = this.pick(dOff);
       const w = this.duel(c1, c2, 'before the armies clash', false);
-      if (w) { war.intel[w === c1 ? att.id : def.id] = (war.intel[w === c1 ? att.id : def.id] || 0) + 0.12; lines.push(`${w.name} wins a duel before the lines and the army roars`); }
+      if (w) { duelSide = w === c1 ? 0 : 1; lines.push(`${w.name} wins a duel before the lines and the army roars`); }
+      for (const list of [aOff, dOff]) for (const o of [...list]) if (!o.alive) list.splice(list.indexOf(o), 1);
     }
-    // disloyal defections
     for (const side of [aOff, dOff]) {
       for (const o of [...side]) {
         if (o.role === 'ruler' || o.loyalty > 30 || !this.chance(0.15)) continue;
@@ -625,50 +653,98 @@ export class World {
         side.splice(side.indexOf(o), 1); (side === aOff ? dOff : aOff).push(o);
         this.stats.defections++;
         if (o.oath.length) { this.spreadRumor(o, 'oathbreaker', 3); for (const b of o.oath) { const bb = this.char(b); if (bb) this.opine(bb, o, -80); } }
-        lines.push(`${o.name} turns their banners against ${mine.name}`);
         o.realmId = other.id; o.liegeId = other.rulerId; o.loyalty = 50;
-        this.log(3, 'betrayal', `In the battle for ${target.name}, ${this.fullName(o)} betrays ${mine.name} and leads their army over to ${other.name}.`, [o.id]);
+        this.log(3, 'betrayal', `Before the battle for ${target.name}, ${this.fullName(o)} betrays ${mine.name} and leads their army over to ${other.name}.`, [o.id]);
       }
     }
-    if (!aOff.length) return { attackerWon: false, decisive: false };
-    const sidePow = (offs, realm, enemyOffs, enemyRealm) => {
-      let p = offs.reduce((a, o) => a + this.power(o), 0);
-      for (const mid of realm.mercs) { const m = this.mercs.find(x => x.id === mid); if (m) p += m.size * (1 + 0.12 * m.level); }
-      const fearful = enemyOffs.some(e => e.titles.deed === 'Legendary Army') && !offs.some(o => o.titles.deed === 'Giant Slayer');
-      if (fearful) p *= 0.88;
-      const butcher = enemyOffs.some(e => e.titles.rep === 'the Butcher') && !offs.some(o => o.titles.rep === 'Deaf Ears');
-      if (butcher) p *= 0.92;
-      if (this.season === 'Winter') p *= 0.85;
-      if (this.realmSetts(realm).some(s => s.famine)) p *= 0.9;
-      p *= 1 + (war.intel[realm.id] || 0);
-      const stratagem = offs.reduce((a, o) => Math.max(a, o.stats.int), 0);
-      p *= 0.75 + this.r() * 0.5 + stratagem * 0.01;
-      return p;
+    const ctx = { att, def, aOff, dOff, target, war, attackerIsA, lines };
+    if (!aOff.length) { this.afterBattle(ctx, { attackerWon: false, decisive: false }); return; }
+    this.stats.battles++;
+    ctx.index = this.stats.battles;
+    ctx.cfg = this.battleConfig(ctx, duelSide);
+    const big = att.tier === 'Kingdom' || def.tier === 'Kingdom' || ctx.cfg.sides.reduce((a, s) => a + s.divisions.reduce((x, d) => x + d.count, 0), 0) > 1400;
+    ctx.big = big;
+    if (this.replayWatched && this.replayWatched.has(ctx.index) && !this.pendingBattle) { ctx.replay = true; this.pendingBattle = ctx; return; }
+    if (!this.pendingBattle && this.watchMode && (this.watchMode === 'all' || (this.watchMode === 'big' && big))) { this.pendingBattle = ctx; return; }
+    // auto-resolve: the same engine with each soldier standing for a company of men
+    const proxy = JSON.parse(JSON.stringify(ctx.cfg));
+    const biggest = Math.max(...proxy.sides.flatMap(s => s.divisions.map(d => d.count)));
+    const per = Math.max(1, biggest / 18);
+    for (const side of proxy.sides) for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per));
+    const b = new Battle(proxy); let n = 0; while (!b.over && n++ < 1000) b.step(0.3);
+    if (!b.over) { b.t = 999; b.checkEnd(); }
+    this.applyBattle(ctx, b);
+  }
+
+  battleConfig(ctx, duelSide) {
+    const { att, def, aOff, dOff, target, war } = ctx;
+    const famine = r => this.realmSetts(r).some(s => s.famine);
+    const sideOf = (realm, offs, enemyOffs, idx) => {
+      const divisions = offs.map(o => ({ faction: o.army.faction || o.culture, unit: o.army.unit ?? 0, count: Math.max(20, Math.min(900, o.army.size)), level: o.army.level, officer: { name: o.name, stats: o.stats, ref: o.id } }));
+      for (const mid of realm.mercs) {
+        const m = this.mercs.find(x => x.id === mid); const cap = m && this.char(m.captainId);
+        if (m && cap && cap.alive && divisions.length < 4) divisions.push({ faction: m.faction, unit: m.unit, count: Math.max(20, Math.min(700, m.size)), level: m.level, officer: { name: cap.name, stats: cap.stats, ref: cap.id, merc: m.id } });
+      }
+      if (!divisions.length) {
+        const head = this.char(realm.rulerId);
+        const ent = UNITS[target.culture].findIndex(u => u.entry && (u.role === 'inf' || u.role === 'heavy'));
+        divisions.push({ faction: target.culture, unit: Math.max(0, ent), count: Math.max(30, Math.round(target.pop * 0.12)), level: 1, officer: { name: head ? head.name : 'the militia captain', stats: head ? head.stats : { lea: 6, mig: 6, int: 5, cha: 7 }, ref: head ? head.id : null } });
+      }
+      let morale = 0;
+      if (enemyOffs.some(e => e.titles.deed === 'Legendary Army') && !offs.some(o => o.titles.deed === 'Giant Slayer')) morale -= 10;
+      if (enemyOffs.some(e => e.titles.rep === 'the Butcher') && !offs.some(o => o.titles.rep === 'Deaf Ears')) morale -= 6;
+      if (famine(realm)) morale -= 8;
+      morale += (war.intel[realm.id] || 0) * 40;
+      if (duelSide === idx) morale += 10;
+      if (idx === 1 && target.biome === 'mountain') morale += 8;
+      const lead = offs[0] || this.char(realm.rulerId);
+      return { faction: target.culture, name: realm.name, realmId: realm.id, color: realm.color, ai: this.generalStyle(lead), canFire: offs.some(o => o.stats.int >= 12), mods: { morale, atk: famine(realm) ? 0.92 : 1 }, divisions };
     };
-    let pa = sidePow(aOff, att, dOff, def);
-    let pd = dOff.length ? sidePow(dOff, def, aOff, att) * 1.15 : target.pop * 0.15;
-    if (terrain === 'forest' && def.culture === 'sylvan' || terrain === 'forest' && def.culture === 'woodelf') pd *= 1.1;
-    if (terrain === 'mountain') pd *= 1.15;
     war.intel[att.id] = 0; war.intel[def.id] = 0;
-    const attackerWon = pa > pd;
-    const ratio = attackerWon ? pa / Math.max(1, pd) : pd / Math.max(1, pa);
-    const decisive = ratio > 1.6;
-    const [wOff, lOff, wR, lR] = attackerWon ? [aOff, dOff, att, def] : [dOff, aOff, def, att];
-    // casualties, xp, fates
-    for (const o of wOff) { o.army.size = Math.round(o.army.size * (0.82 + this.r() * 0.12)); o.army.wins++; this.armyXp(o, 30); this.gainXp(o, 30); o.fame += 3; }
-    for (const o of lOff) {
-      o.army.size = Math.round(o.army.size * (0.45 + this.r() * 0.3)); o.army.losses++; this.armyXp(o, 12); this.gainXp(o, 12);
-      const roll = this.r();
-      if (roll < (decisive ? 0.12 : 0.06)) { this.die(o, `fell in battle at ${target.name}`); lines.push(`${o.name} falls`); this.officerFallen(o, lR); }
-      else if (roll < (decisive ? 0.25 : 0.14)) { o.prisonerOf = wR.id; lines.push(`${o.name} is taken prisoner`); }
+    const s0 = sideOf(att, aOff, dOff, 0), s1 = sideOf(def, dOff, aOff, 1);
+    if (Math.abs(parseInt(s0.color.slice(1), 16) - parseInt(s1.color.slice(1), 16)) < 0x202020) s1.color = '#e8e2d0';
+    return { seed: Math.floor(this.r() * 1e9), terrain: target.biome, season: this.season, sides: [s0, s1] };
+  }
+
+  applyBattle(ctx, b) {
+    const { att, def, target, lines } = ctx;
+    const wonSide = b.winner; const wR = wonSide === 0 ? att : def, lR = wonSide === 0 ? def : att;
+    let loserCas = 0, loserStart = 0;
+    for (const d of b.divisions) {
+      const ref = d.officer.ref; const o = ref != null ? this.char(ref) : null;
+      const survive = Math.max(0.03, (b.aliveCount(d) + d.fled) / d.start);
+      const won = d.side === wonSide;
+      if (!won) { loserCas += d.dead / d.start; loserStart++; }
+      if (d.officer.merc) { const m = this.mercs.find(x => x.id === d.officer.merc); if (m) m.size = Math.round(m.size * survive); }
+      else if (o && o.army) {
+        o.army.size = Math.round(o.army.size * survive);
+        if (won) { o.army.wins++; this.armyXp(o, 30); this.gainXp(o, 30); o.fame += 3; } else { o.army.losses++; this.armyXp(o, 12); this.gainXp(o, 12); }
+      }
+      if (d.rallied && o) { o.fame += 4; lines.push(`${o.name} rallies their broken ${this.plural(d.unitName)}`); }
+      if (o && !d.officer.alive) { this.die(o, `fell in battle at ${target.name}`); lines.push(`${o.name} falls`); this.officerFallen(o, d.side === 0 ? att : def); }
+      else if (o && d.officer.captured) { o.prisonerOf = (d.side === 0 ? def : att).id; lines.push(`${o.name} is taken prisoner`); }
     }
-    for (const o of wOff) if (this.chance(0.02)) { this.die(o, `fell in victory at ${target.name}`); lines.push(`${o.name} dies in the hour of victory`); this.officerFallen(o, wR); }
-    const lead = wOff[0];
-    if (lead && lead.army && lead.army.wins >= 6 && !lead.titles.deed) { if (this.grantDeed(lead, 'Legendary Army')) lines.push(`${lead.name}'s host is hailed as a Legendary Army`); }
+    const routs = [...new Set(b.divisions.filter(d => d.routed && d.side !== wonSide).map(d => this.plural(d.unitName)))];
+    if (b.fires.length) lines.push(`fire arrows rain on the field`);
+    if (routs.length) lines.push(`the ${routs.slice(0, 3).join(', ')} break and flee`);
+    const wOffs = (wonSide === 0 ? ctx.aOff : ctx.dOff).filter(o => o.alive);
+    const lead = wOffs.sort((x, y) => this.power(y) - this.power(x))[0];
+    if (lead && lead.army && lead.army.wins >= 6 && this.grantDeed(lead, 'Legendary Army')) lines.push(`${lead.name}'s host is hailed as a Legendary Army`);
     if (lead && lead.army && lead.army.wins >= 3 && !lead.titles.rank && lead.role === 'officer') { lead.titles.rank = wR.tier === 'Kingdom' && this.realmOfficers(wR).every(o => o.titles.rank !== 'Marshal') ? 'Marshal' : 'General'; lines.push(`${lead.name} is named ${lead.titles.rank}`); lead.loyalty = Math.min(100, lead.loyalty + 15); }
-    const imp = decisive || lines.length > 1 ? 2 : 1;
-    this.log(imp, 'battle', `Battle of ${target.name} (${this.season.toLowerCase()}, ${terrain}). ${wR.name}, led by ${lead ? this.fullName(lead) : 'its levies'}, ${decisive ? 'crushes' : 'defeats'} ${lR.name}.${lines.length ? ' ' + lines.join('; ') + '.' : ''}`, [...aOff, ...dOff].map(o => o.id));
-    return { attackerWon, decisive };
+    const decisive = loserStart && loserCas / loserStart > 0.45;
+    const sizes = i => ctx.cfg.sides[i].divisions.reduce((a, d) => a + d.count, 0);
+    const troopWord = `${sizes(0).toLocaleString()} against ${sizes(1).toLocaleString()}`;
+    const imp = decisive || lines.length > 1 || ctx.big ? 2 : 1;
+    this.log(imp, 'battle', `Battle of ${target.name} (${this.season.toLowerCase()}, ${target.biome}). ${att.name} attacks ${def.name}, ${troopWord}. ${wR.name}, led by ${lead ? this.fullName(lead) : 'its levies'}, ${decisive ? 'crushes' : 'defeats'} ${lR.name}.${lines.length ? ' ' + lines.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : ''}`, [...ctx.aOff, ...ctx.dOff].map(o => o.id));
+    const last = this.chronicle[this.chronicle.length - 1]; last.battle = ctx.index; last.watched = !!ctx.watched;
+    this.afterBattle(ctx, { attackerWon: wonSide === 0, decisive });
+  }
+
+  finishWatched(b) {
+    const ctx = this.pendingBattle; if (!ctx) return;
+    this.pendingBattle = null; ctx.watched = true;
+    if (!(this.watchedList || (this.watchedList = [])).includes(ctx.index)) this.watchedList.push(ctx.index);
+    this.applyBattle(ctx, b);
   }
 
   officerFallen(o, realm) {
@@ -693,7 +769,13 @@ export class World {
     a.xp += n;
     while (a.xp >= 40 + a.level * 15 && a.level < 10) { a.xp -= 40 + a.level * 15; a.level++; }
     const after = this.troopTier(a);
-    if (after !== before) this.log(after === 'Elite' ? 2 : 1, 'army', `${this.fullName(o)}'s troops have hardened into ${after}. Their new gear marks them from across the field.`, [o.id]);
+    if (after !== before) {
+      const def = a.faction && UNITS[a.faction][a.unit];
+      if (def && def.up != null) {
+        const old = def.name; a.unit = def.up;
+        this.log(2, 'army', `${this.fullName(o)}'s ${this.plural(old)} have hardened into ${after} and now march as ${this.plural(this.unitName(a))}. You can tell them on sight.`, [o.id]);
+      } else this.log(after === 'Elite' ? 2 : 1, 'army', `${this.fullName(o)}'s ${this.plural(this.unitName(a))} have hardened into ${after}.`, [o.id]);
+    }
   }
   gainXp(c, n) {
     c.xp += n;

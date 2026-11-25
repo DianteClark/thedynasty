@@ -3,15 +3,9 @@
 
 export const FIELD = { w: 1600, h: 1000 };
 
-// Unit roles by faction roster index (tier 1..7). Names come from assets/units/units.json.
-export const ROSTERS = {
-  aldmark: ['inf', 'ranged', 'inf', 'flyer', 'magic', 'cav', 'heavy'],
-  ashborn: ['inf', 'ranged', 'cav', 'inf', 'heavy', 'flyer', 'heavy'],
-  undying: ['inf', 'heavy', 'flyer', 'cav', 'flyer', 'magic', 'cav'],
-  sylvan: ['flyer', 'heavy', 'ranged', 'inf', 'cav', 'magic', 'heavy'],
-  kharn: ['inf', 'cav', 'flyer', 'magic', 'ranged', 'heavy', 'ranged'],
-  azure: ['inf', 'flyer', 'heavy', 'magic', 'inf', 'flyer', 'ranged'],
-};
+import { UNITS } from '../assets/units/units.js';
+export { UNITS };
+
 const ROLE = {
   inf: { hp: 10, atk: 2.0, def: 1.0, spd: 24, range: 0, cd: 1.0, label: 'Infantry' },
   heavy: { hp: 17, atk: 2.8, def: 1.8, spd: 17, range: 0, cd: 1.2, label: 'Heavy infantry' },
@@ -28,33 +22,38 @@ function mulberry(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = 
 
 export class Battle {
   /**
-   * cfg: { seed, terrain, sides: [ { faction, name, color, ai: null | 'reckless'|'balanced'|'cautious', divisions: [ { unit: index, count, level, officer: {name, stats:{lea,mig,int,cha}} } ] } x2 ] }
+   * cfg: { seed, terrain, season, sides: [ { faction, name, color, ai: null | 'reckless'|'balanced'|'cautious', canFire, mods: {morale, atk},
+   *        divisions: [ { faction?, unit: index, count, level, officer: {name, stats:{lea,mig,int,cha}, ref} } ] } x2 ] }
    */
-  constructor(cfg, unitNames) {
+  constructor(cfg) {
     this.rand = mulberry(cfg.seed || 1);
     this.terrain = cfg.terrain || 'plains';
     this.t = 0; this.over = false; this.winner = null; this.events = [];
     this.soldiers = []; this.divisions = []; this.projectiles = []; this.messengers = []; this.fires = []; this.corpses = [];
     this.cell = 32; this.gw = Math.ceil(FIELD.w / this.cell); this.gh = Math.ceil(FIELD.h / this.cell);
-    this.sides = cfg.sides.map((s, i) => ({ ...s, index: i, dir: i === 0 ? 1 : -1, fireUsed: false, hq: { x: i === 0 ? 40 : FIELD.w - 40, y: FIELD.h / 2 } }));
+    this.season = cfg.season || 'Summer';
+    this.sides = cfg.sides.map((s, i) => ({ ...s, index: i, dir: i === 0 ? 1 : -1, fireUsed: s.canFire === false, hq: { x: i === 0 ? 40 : FIELD.w - 40, y: FIELD.h / 2 } }));
     this.trees = [];
     const nTrees = { forest: 70, plains: 8, swamp: 22, wasteland: 6, tundra: 14, mountain: 18 }[this.terrain] || 8;
     for (let i = 0; i < nTrees; i++) this.trees.push({ x: 260 + this.r() * (FIELD.w - 520), y: 60 + this.r() * (FIELD.h - 120), alt: this.r() < 0.35 });
     for (const side of this.sides) {
       const n = side.divisions.length;
       side.divisions.forEach((d, k) => {
-        const role = ROSTERS[side.faction][d.unit];
+        const faction = d.faction || side.faction;
+        const def = UNITS[faction][d.unit];
+        const role = def.role;
         const R = ROLE[role];
-        const tier = d.unit; // 0..6
+        const tier = this.unitTier(faction, d.unit);
         const lvl = 1 + 0.06 * ((d.level || 1) - 1);
+        const mods = side.mods || {};
         const mult = (1 + 0.22 * tier) * lvl;
         const y = FIELD.h * (k + 1) / (n + 1);
         const x = side.index === 0 ? 260 + (role === 'ranged' || role === 'magic' ? -60 : 0) : FIELD.w - 260 - (role === 'ranged' || role === 'magic' ? -60 : 0);
         const div = {
-          id: this.divisions.length, side: side.index, faction: side.faction, unit: d.unit, unitName: unitNames[side.faction][d.unit], role, R,
-          stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5, def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6, spd: R.spd, range: R.range, cd: R.cd },
+          id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
+          stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
           level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: true, captured: false },
-          cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5,
+          cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5 + (mods.morale || 0),
           start: d.count, dead: 0, fled: 0, routed: false, rallied: 0, flankPhase: 0, chargeT: 0, lastHit: -9, inCombat: false, contactT: 0, color: side.color,
         };
         div.morale = div.baseMorale;
@@ -73,6 +72,12 @@ export class Battle {
   }
 
   r() { return this.rand(); }
+  unitTier(f, u) {
+    // how far along its upgrade line a unit sits, plus a bump for naturally strong units
+    let depth = 0; for (let i = 0; i < 8; i++) { const prev = UNITS[f].findIndex(x => x.up === u); if (prev < 0) break; depth++; u = prev; }
+    const base = UNITS[f].length === 7 ? Math.min(6, [0, 1, 2, 3, 4, 5, 6].indexOf(u)) * 0.5 : 1.5;
+    return Math.min(6, depth * 2 + base);
+  }
   log(text, side, kind = 'info') { this.events.push({ t: this.t, text, side, kind }); }
   aliveCount(div) { return div.soldiers.length - div.dead - div.fled; }
   centroid(div) {
@@ -284,7 +289,7 @@ export class Battle {
     e.hitT = 0.25; e.div.lastHit = this.t; if (by) by.div.lastHit = this.t;
     if (e.hp <= 0) {
       e.alive = false; e.dying = 0.6; e.at = 0; e.anim = 4; e.div.dead++;
-      e.div.morale -= (100 / e.div.start) * 1.05;
+      e.div.morale -= (100 / Math.max(12, e.div.start)) * 1.05 * (e.div.start < 12 ? e.div.start / 12 : 1);
     }
   }
   shoot(s, e) {

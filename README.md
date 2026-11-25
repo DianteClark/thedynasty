@@ -48,3 +48,13 @@ The **Battle** tab sets up a battle on a map built from the HAS overworld tiles:
 - Pan, pinch to zoom, overview toggle, minimap, and pause / 1× / 2× / 4× speed
 
 Sprite atlases are built from the original HAS frames by `tools/build_assets.py`.
+
+## Prototype 0.3: world battles
+
+- Every war in the world is fought on the battle engine, using the real officers, army sizes and levels, terrain, season, mercenaries and militia
+- Each officer's army has a unit type that suits them (leaders ride, thinkers shoot or cast, fighters hold the line), and at each troop tier it upgrades to the next unit in its line, so you can tell veterans on sight
+- All ten cultures fight with HAS sprites, including Dwarves, Lizardmen and Wood Elves (base and upgraded units) and Orcs
+- What carries into battle: fear of a Legendary Army (cancelled by a Giant Slayer), the Butcher's reputation (cancelled by Deaf Ears), famine, spy intel, a duel won before the lines, defenders holding mountains, and only officers with Intellect 12+ can call a fire volley
+- Generals fight in character: reckless, cautious or balanced, from their traits
+- Watch battles as they happen (⚙ → never, big battles, every battle); the world pauses and the battle map opens. Skipped battles use the same engine with each soldier standing in for a company
+- Saves stay exact: battles you watched are re-fought step for step when your world is rebuilt

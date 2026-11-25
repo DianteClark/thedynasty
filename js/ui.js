@@ -1,6 +1,6 @@
 import { World, SIZES, TROOP_TIERS } from './sim.js';
 import { cultureById } from './names.js';
-import { renderBattleSetup, handleBattleSetupClick } from './battleview.js';
+import { renderBattleSetup, handleBattleSetupClick, watchBattle } from './battleview.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -8,33 +8,39 @@ const SAVE_KEY = 'dynasty.save.v1';
 const BIOME_COLORS = { water: '#1d3a52', plains: '#6f8a45', forest: '#355f33', swamp: '#4b5e45', wasteland: '#a08350', tundra: '#c9d3d6', mountain: '#6e6a66' };
 const TYPE_LABELS = { war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
-let world, playing = false, busy = false, tab = 'chronicle';
+let world, playing = false, busy = false, tab = 'chronicle', watchMode = 'big';
 const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null };
 
 // ---------- save / load (the sim is deterministic, so a seed + month count rebuilds the world) ----------
-function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: world.seed, size: world.size, months: (world.year - 1) * 12 + world.month })); } catch (e) { /* storage unavailable */ } }
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: world.seed, size: world.size, months: (world.year - 1) * 12 + world.month, watched: world.watchedList || [], watchMode })); } catch (e) { /* storage unavailable */ } }
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; } }
 
 function randomSeed() { const w = ['ember', 'raven', 'thorn', 'gold', 'ash', 'storm', 'iron', 'moon', 'wolf', 'crown', 'frost', 'oak']; return w[Math.floor(Math.random() * w.length)] + '-' + Math.floor(Math.random() * 9000 + 1000); }
 
-async function newWorld(seed, size, months = 0) {
+async function newWorld(seed, size, months = 0, watched = []) {
   playing = false; setPlayBtn();
   world = new World(seed, size);
-  if (months > 0) await advance(months);
+  // rebuild the saved world: battles you watched are re-fought exactly as you saw them
+  world.replayWatched = new Set(watched); world.watchedList = [...watched];
+  if (months > 0) await advance(months, true);
+  world.replayWatched = null; world.watchMode = watchMode === 'off' ? null : watchMode;
   ui.shown = 60; ui.mapSel = null;
   save(); render();
 }
 
 // ---------- time ----------
-function advance(months) {
+function advance(months, replaying = false) {
   return new Promise(resolve => {
     busy = true; setBusy(true);
-    let done = 0; const chunk = 6;
+    let done = 0; const chunk = 3;
     const bar = $('#progressBar'); $('#progress').hidden = months < 24;
-    const step = () => {
+    const step = async () => {
       const n = Math.min(chunk, months - done);
-      for (let i = 0; i < n; i++) world.tick();
-      done += n; bar.style.width = (done / months * 100) + '%';
+      for (let i = 0; i < n; i++) {
+        world.tick(); done++;
+        if (world.pendingBattle && !replaying) { $('#progress').hidden = true; await watchPending(); $('#progress').hidden = months < 24; }
+      }
+      bar.style.width = (done / months * 100) + '%';
       updateHeader();
       if (done < months) setTimeout(step, 0);
       else { busy = false; setBusy(false); $('#progress').hidden = true; save(); render(); resolve(); }
@@ -42,10 +48,16 @@ function advance(months) {
     step();
   });
 }
+function watchPending() {
+  const ctx = world.pendingBattle;
+  const info = { title: `Battle of ${ctx.target.name}: ${ctx.att.name} attacks ${ctx.def.name}` };
+  return new Promise(res => watchBattle(ctx.cfg, info, b => { world.finishWatched(b); save(); render(); res(); }));
+}
 let lastTick = 0, lastCount = 0;
 function loop(t) {
   if (playing && !busy && t - lastTick > 220) {
     lastTick = t; world.tick(); updateHeader();
+    if (world.pendingBattle) { busy = true; watchPending().then(() => { busy = false; lastTick = performance.now(); }); }
     const n = world.chronicle.filter(e => e.importance >= ui.level).length;
     if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || world.month === 0) { lastCount = n; render(true); }
     if (world.month === 0) save();
@@ -101,7 +113,7 @@ function renderChronicle() {
   for (const e of entries) {
     if (e.y !== lastY) { html += `<div class="year">Year ${e.y}</div>`; lastY = e.y; }
     const people = e.ids.slice(0, 4).map(id => charPill(world.char(id))).join('');
-    html += `<div class="entry i${e.importance}"><div class="meta">${TYPE_LABELS[e.type] || 'The world'} · ${['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'][e.m]}</div>${esc(e.text)}${people ? `<div class="who">${people}</div>` : ''}</div>`;
+    html += `<div class="entry i${e.importance}"><div class="meta">${e.watched ? '👁 Watched · ' : ''}${TYPE_LABELS[e.type] || 'The world'} · ${['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'][e.m]}</div>${esc(e.text)}${people ? `<div class="who">${people}</div>` : ''}</div>`;
   }
   if (total > ui.shown) html += `<button class="more" id="moreBtn">Show older (${total - ui.shown} more)</button>`;
   view.innerHTML = html;
@@ -259,7 +271,7 @@ function charSheet(id) {
     <div style="margin-top:6px">${titleTags(c)} ${c.traits.map(t => `<span class="tag">${t}</span>`).join('')}${c.wounded ? '<span class="tag war">Wounded</span>' : ''}${c.prisonerOf ? `<span class="tag war">Prisoner of ${esc(world.realm(c.prisonerOf)?.name || '?')}</span>` : ''}${c.wardOf ? `<span class="tag">Ward at ${esc(world.realm(c.wardOf)?.name || '?')}</span>` : ''}</div>
     <div class="statgrid"><div><b>${st.lea}</b><small>Leadership</small></div><div><b>${st.mig}</b><small>Might</small></div><div><b>${st.int}</b><small>Intellect</small></div><div><b>${st.pol}</b><small>Politics</small></div><div><b>${st.cha}</b><small>Charisma</small></div></div>
     ${c.role === 'officer' ? `<div class="sub">Loyalty to their lord: ${Math.round(c.loyalty)}</div><div class="bar"><div style="width:${c.loyalty}%"></div></div>` : ''}
-    ${a ? `<div class="card" style="margin-top:12px"><h3>⚔ Army</h3><div class="kv"><div><b>${a.size}</b><small>Troops</small></div><div><b>${a.level}/10</b><small>Level</small></div><div><b>${world.troopTier(a)}</b><small>Tier</small></div></div><div class="sub" style="margin-top:6px">${a.wins} victories · ${a.losses} defeats</div></div>` : ''}
+    ${a ? `<div class="card" style="margin-top:12px"><h3>⚔ Army of ${esc(world.plural(world.unitName(a)))}</h3><div class="kv"><div><b>${a.size}</b><small>Troops</small></div><div><b>${a.level}/10</b><small>Level</small></div><div><b>${world.troopTier(a)}</b><small>Tier</small></div></div><div class="sub" style="margin-top:6px">${a.wins} victories · ${a.losses} defeats</div></div>` : ''}
     <div class="card"><h3>Family and bonds</h3>
       ${sp ? `<div style="margin:5px 0">Spouse: ${charPill(sp)}</div>` : ''}
       ${parents.length ? `<div style="margin:5px 0">Parents: ${parents.map(charPill).join(' ')}</div>` : ''}
@@ -302,7 +314,7 @@ function realmSheet(id) {
 function officerRow(o) {
   const a = o.army;
   return `<div class="card tap" data-char="${o.id}"><b>${esc(o.name)}${o.dynasty ? ' ' + esc(o.dynasty) : ''}</b> <span class="sub">Lv ${o.level}${o.role === 'officer' ? ` · loyalty ${Math.round(o.loyalty)}` : ''}</span><div>${titleTags(o)}</div>
-    ${a ? `<div class="sub" style="margin-top:4px">${a.size} ${TROOP_TIERS.includes(world.troopTier(a)) ? world.troopTier(a) : ''} · army level ${a.level}/10 · ${a.wins}W ${a.losses}L</div>` : ''}</div>`;
+    ${a ? `<div class="sub" style="margin-top:4px">${a.size} ${esc(world.plural(world.unitName(a)))} · ${world.troopTier(a)} · army level ${a.level}/10 · ${a.wins}W ${a.losses}L</div>` : ''}</div>`;
 }
 
 function worldSheet() {
@@ -313,8 +325,11 @@ function worldSheet() {
     <label class="field"><span>Seed</span><input id="seedIn" value="${esc(randomSeed())}" autocomplete="off"></label>
     <label class="field"><span>Map size</span><select id="sizeIn">${Object.entries(SIZES).map(([k, v]) => `<option value="${k}" ${k === world.size ? 'selected' : ''}>${v.label} (${v.setts} settlements)</option>`).join('')}</select></label>
     <button class="btn" id="createWorld">Create new world</button>
+    <label class="field"><span>Watch battles as they happen</span></label>
+    <div class="chips">${[['off', 'Never'], ['big', 'Big battles'], ['all', 'Every battle']].map(([k, l]) => `<button class="chip ${watchMode === k ? 'on' : ''}" data-watch="${k}">${l}</button>`).join('')}</div>
+    <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <button class="btn ghost" id="restartWorld">Restart this world from year 1</button>
-    <p class="note">Prototype 0.1: the world simulates itself so we can judge whether its history is interesting. Player control, battle maps and the full officer and kingdom management come in later builds. Your world is saved on this device.</p>
+    <p class="note">Prototype 0.3: the world runs itself, and its wars are fought on the battle engine. Playing as your own character comes in later builds. Your world is saved on this device.</p>
   `);
 }
 
@@ -333,6 +348,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.realm) return realmSheet(+t.dataset.realm);
   if (t.id === 'createWorld') { const seed = $('#seedIn').value.trim() || randomSeed(); const size = $('#sizeIn').value; closeSheet(); return newWorld(seed, size); }
   if (t.id === 'restartWorld') { closeSheet(); return newWorld(world.seed, world.size); }
+  if (t.dataset.watch) { watchMode = t.dataset.watch; world.watchMode = watchMode === 'off' ? null : watchMode; save(); return worldSheet(); }
 });
 $('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap') closeSheet(); });
 $('#btnPlay').onclick = () => { if (busy) return; playing = !playing; setPlayBtn(); };
@@ -345,7 +361,8 @@ window.addEventListener('resize', () => { if (tab === 'map') drawMap(); });
 // ---------- start ----------
 (async () => {
   const saved = load();
-  if (saved && SIZES[saved.size]) await newWorld(saved.seed, saved.size, saved.months);
+  if (saved && saved.watchMode) watchMode = saved.watchMode;
+  if (saved && SIZES[saved.size]) await newWorld(saved.seed, saved.size, saved.months, saved.watched || []);
   else await newWorld(randomSeed(), 'large');
   requestAnimationFrame(loop);
 })();
