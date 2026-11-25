@@ -4,6 +4,7 @@ import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle }
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
 import { renderYou, renderCreation, readForm, handleFormClick, setStance } from './you.js';
 import { watchDuels } from './duelview.js';
+import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod, setMod, MAX_SLOTS } from './store.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -16,11 +17,16 @@ const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null };
 
 // ---------- save / load ----------
 // The sim is deterministic: a seed, your actions and your battle choices rebuild the world exactly.
+// Saves are snapshots of the whole world in a save slot (IndexedDB), so loading is instant.
+let slotId = null, saving = null;
 function save() {
-  if (!world) return;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: world.seed, size: world.size, monthIndex: world.monthIndex, actions: world.actions, battleLog: world.battleLog, watchMode })); } catch (e) { /* storage unavailable */ }
+  if (!world || !slotId || world.pendingBattle) return;
+  if (saving) { saving.again = true; return; }
+  saving = {};
+  saveWorld(slotId, world).catch(() => {}).finally(() => { const again = saving.again; saving = null; if (again) save(); });
 }
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; } }
+try { const wm = localStorage.getItem('dynasty.watch'); if (wm) watchMode = wm; } catch (e) { /* ignore */ }
 function randomSeed() { const w = ['ember', 'raven', 'thorn', 'gold', 'ash', 'storm', 'iron', 'moon', 'wolf', 'crown', 'frost', 'oak']; return w[Math.floor(Math.random() * w.length)] + '-' + Math.floor(Math.random() * 9000 + 1000); }
 
 function toast(text, kind = '') {
@@ -40,8 +46,11 @@ async function rebuild(saved) {
 }
 async function newGame(f) {
   playing = false; setPlayBtn();
+  const s = slots();
+  if (s.list.length >= MAX_SLOTS) { const oldest = s.list.slice().sort((a, b) => a.savedAt - b.savedAt)[0]; await deleteWorld(oldest.id); }
+  slotId = newSlotId(); setCurrent(slotId);
   view.innerHTML = `<div class="empty">A world is being born.<br>Kingdoms rise, wars are fought, dynasties begin.<br>Thirty years of history are being written before you arrive.</div>`; window.scrollTo(0, 0);
-  world = new World(f.seed || randomSeed(), f.size); setWorld(world);
+  world = new World(f.seed || randomSeed(), f.size, getMod()); setWorld(world);
   world.watchMode = null;
   await runMonths(HISTORY_YEARS * 12, { quiet: true, label: 'Thirty years of history unfold' });
   world.watchMode = watchMode === 'off' ? null : watchMode;
@@ -379,11 +388,17 @@ function worldSheet() {
     <h2>Worlds</h2>
     <div class="sub">Every world grows from a seed. Share a seed and someone else gets the same starting world, but history will unfold differently once you play.</div>
     <div class="card" style="margin-top:12px"><b>Current world</b><div class="sub">Seed “${esc(world.seed)}” · ${SIZES[world.size].label} · Year ${world.year}</div></div>
-    <button class="btn" id="createWorld">Start over in a new world</button>
+    <div class="abtns"><button class="abtn" data-copy-seed>Copy seed</button></div>
+    <h2 class="sec">Saves</h2>
+    ${slots().list.map(x => `<div class="card"><b>${esc(x.who)}</b>${x.id === slotId ? ' <span class="tag title">playing</span>' : ''}${x.alive ? '' : ' <span class="tag war">line ended</span>'}<div class="sub">Year ${x.year} · seed “${esc(x.seed)}” · ${SIZES[x.size]?.label || ''}</div><div class="abtns">${x.id !== slotId ? `<button class="abtn" data-load-slot="${x.id}">Continue</button>` : ''}<button class="abtn" data-del-slot="${x.id}">Delete</button></div></div>`).join('')}
+    <button class="btn" id="createWorld">New game${slots().list.length >= MAX_SLOTS ? ' (replaces your oldest save)' : ''}</button>
+    <h2 class="sec">Mods</h2>
+    <div class="sub">A mod is a small JSON file that can rename cultures, change their name pools, and tune how often wars, monsters, famines, plots and tournaments happen. It applies to new worlds. ${getMod() ? `Active: <b>${esc(getMod().name || 'unnamed mod')}</b>.` : 'No mod active.'}</div>
+    <div class="abtns"><label class="abtn" style="cursor:pointer">Load a mod file<input type="file" accept=".json,application/json" id="modFile" hidden></label>${getMod() ? '<button class="abtn" data-clear-mod>Remove mod</button>' : ''}<a class="abtn" href="mods/grim-and-perilous.json" download>Example mod</a></div>
     <label class="field"><span>Watch battles as they happen</span></label>
     <div class="chips">${[['off', 'Never'], ['big', 'Big battles'], ['all', 'Every battle']].map(([k, l]) => `<button class="chip ${watchMode === k ? 'on' : ''}" data-watch="${k}">${l}</button>`).join('')}</div>
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
-    <p class="note">Prototype 0.5: you live in the world now. Your world is saved on this device, and rebuilt exactly from its seed and your choices.</p>
+    <p class="note">Your world is saved on this device automatically.</p>
   `);
 }
 
@@ -410,8 +425,12 @@ document.addEventListener('click', ev => {
   if (t.id === 'moreBtn') { ui.shown += 80; return renderChronicle(); }
   if (t.dataset.char) return charSheet(+t.dataset.char);
   if (t.dataset.realm) return realmSheet(+t.dataset.realm);
-  if (t.id === 'createWorld') { if (!window.confirm('Leave this world and start over?')) return; closeSheet(); world = null; creatingLife = false; if (tab === 'map') unmountMap(); tab = 'you'; selectTab(); return render(); }
-  if (t.dataset.watch) { watchMode = t.dataset.watch; world.watchMode = watchMode === 'off' ? null : watchMode; save(); return worldSheet(); }
+  if (t.id === 'createWorld') { if (slots().list.length >= MAX_SLOTS && !window.confirm('Your oldest save will be replaced. Continue?')) return; closeSheet(); save(); world = null; slotId = null; creatingLife = false; if (tab === 'map') unmountMap(); tab = 'you'; selectTab(); return render(); }
+  if (t.dataset.loadSlot) { closeSheet(); save(); return openSlot(t.dataset.loadSlot); }
+  if (t.dataset.delSlot) { if (!window.confirm('Delete this save for good?')) return; const id = t.dataset.delSlot; return deleteWorld(id).then(() => { if (id === slotId) { slotId = null; world = null; closeSheet(); tab = 'you'; selectTab(); render(); } else worldSheet(); }); }
+  if (t.dataset.copySeed != null) { navigator.clipboard?.writeText(world.seed).then(() => toast(`Seed “${world.seed}” copied. Share it and a friend can start in the same world.`)).catch(() => toast(`Seed: ${world.seed}`)); return; }
+  if (t.dataset.clearMod != null) { setMod(null); toast('Mod removed. New worlds will be unmodded.'); return worldSheet(); }
+  if (t.dataset.watch) { watchMode = t.dataset.watch; world.watchMode = watchMode === 'off' ? null : watchMode; try { localStorage.setItem('dynasty.watch', watchMode); } catch (e) { /* ignore */ } return worldSheet(); }
 });
 $('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap' && !$('#sheetWrap').dataset.locked) closeSheet(); });
 const ready = () => world && world.playerId && !busy;
@@ -419,7 +438,10 @@ $('#btnPlay').onclick = () => { if (!ready()) return; playing = !playing; setPla
 $('#btnYear').onclick = () => ready() && runMonths(12);
 $('#btnTen').onclick = () => ready() && runMonths(120);
 $('#btnHundred').onclick = () => ready() && runMonths(1200);
-$('#btnWorld').onclick = () => !busy && world && worldSheet();
+$('#btnWorld').onclick = () => !busy && (world ? worldSheet() : savesOnlySheet());
+function savesOnlySheet() {
+  openSheet(`<h2>Saves</h2>${slots().list.map(x => `<div class="card"><b>${esc(x.who)}</b><div class="sub">Year ${x.year} · seed “${esc(x.seed)}”</div><div class="abtns"><button class="abtn" data-load-slot="${x.id}">Continue</button><button class="abtn" data-del-slot="${x.id}">Delete</button></div></div>`).join('') || '<div class="sub">No saves yet.</div>'}`);
+}
 function doAct(a) {
   world.lastPlayerDuel = null;
   const msg = world.act(a); save(); render(tab === 'map'); if (tab === 'map') refreshCard(); if (msg) toast(msg);
@@ -428,12 +450,38 @@ function doAct(a) {
 
 // ---------- start ----------
 window.dynasty = () => world; window.dynastyCam = debugCam; // handy for debugging from the console
+async function openSlot(id) {
+  view.innerHTML = '<div class="empty">Opening your world…</div>';
+  try {
+    const snap = await loadWorld(id);
+    if (!snap) throw new Error('missing');
+    world = World.restore(snap); setWorld(world); slotId = id; setCurrent(id);
+    world.watchMode = watchMode === 'off' ? null : watchMode;
+  } catch (e) { world = null; slotId = null; toast('That save could not be opened.'); }
+  playing = false; setPlayBtn(); if (tab === 'map') unmountMap(); tab = 'you'; selectTab(); render();
+}
+document.addEventListener('change', ev => {
+  if (ev.target.id !== 'modFile') return;
+  const f = ev.target.files[0]; if (!f) return;
+  f.text().then(txt => { const mod = JSON.parse(txt); if (typeof mod !== 'object' || Array.isArray(mod)) throw new Error('bad'); setMod(mod); toast(`Mod “${mod.name || f.name}” loaded. It applies to your next new world.`); worldSheet(); }).catch(() => toast('That file is not a valid mod.'));
+});
+window.addEventListener('pagehide', () => save());
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
 (async () => {
   selectTab();
-  const saved = load();
-  if (saved && saved.watchMode) watchMode = saved.watchMode;
-  if (saved && SIZES[saved.size] && saved.actions && saved.actions.length) { await rebuild(saved); render(); }
-  else render();
+  const s = slots();
+  if (s.current && s.list.some(x => x.id === s.current)) await openSlot(s.current);
+  else {
+    const saved = load();
+    if (saved && SIZES[saved.size] && saved.actions && saved.actions.length) {
+      // a save from 0.5–0.8: rebuild it once, then keep it as a snapshot
+      if (saved.watchMode) watchMode = saved.watchMode;
+      await rebuild(saved); slotId = newSlotId(); setCurrent(slotId); save();
+      try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+    }
+    render();
+  }
   requestAnimationFrame(loop);
 })();
 

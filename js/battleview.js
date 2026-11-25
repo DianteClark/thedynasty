@@ -7,6 +7,7 @@ const role = (f, u) => UNITS[f][u].role;
 const TERRAINS = ['plains', 'forest', 'swamp', 'wasteland', 'tundra', 'mountain'];
 const ROLE_LABEL = { inf: 'Infantry', heavy: 'Heavy', ranged: 'Ranged', magic: 'Casters', cav: 'Cavalry', flyer: 'Fliers' };
 const SIZES = { skirmish: 0.45, battle: 1, war: 1.6 };
+const GLYPH = { hold: '■', advance: '➜', charge: '⚔', flankL: '↰', flankR: '↱', retreat: '↩' };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 let unitNames = null, images = {}, assetsReady = null;
@@ -197,6 +198,13 @@ function draw() {
     if (B.aliveCount(div) <= 0) continue;
     const c = div.c || B.centroid(div);
     if (div === sel) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.ellipse(c.x, c.y, div.cols * div.spacing * 0.75, div.cols * div.spacing * 0.75, 0, 0, 7); g.stroke(); }
+    if (div.side === mySide && !spectator && !div.routed) {
+      const ord = div.pending ? div.pending.order : div.state; const gy = c.y - div.cols * div.spacing * 0.5 - 18;
+      g.font = `700 ${Math.round(14 / Math.max(0.6, cam.z) * 1)}px sans-serif`; g.textAlign = 'center';
+      g.fillStyle = 'rgba(16,12,8,.8)'; g.beginPath(); g.arc(c.x, gy - 5, 11 / Math.max(0.6, cam.z), 0, 7); g.fill();
+      g.strokeStyle = div.pending ? `rgba(255,215,106,${0.5 + 0.5 * Math.sin(B.t * 6)})` : '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.stroke();
+      g.fillStyle = div.pending ? '#ffd76a' : '#fff4dc'; g.fillText(GLYPH[ord] || '•', c.x, gy);
+    }
     if (div.side === mySide && div.pending) { const m = div.pending; g.strokeStyle = 'rgba(255,215,106,.6)'; g.setLineDash([4, 5]); g.lineWidth = 1.5 / cam.z; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(div.officer.x, div.officer.y); g.stroke(); g.setLineDash([]); }
   }
   // soldiers sorted by y, with team color under their feet
@@ -265,7 +273,7 @@ function renderDivCards() {
     return `<button class="bdiv ${d === sel ? 'on' : ''} ${d.routed ? 'rout' : ''}" data-b="sel" data-id="${d.id}">
       <span class="bdname">${esc(d.unitName)}</span><span class="bdcount">${alive}</span>
       <span class="bmor"><i style="width:${Math.max(0, Math.min(100, d.morale))}%;background:${d.morale < 30 ? '#e2553f' : d.morale < 55 ? '#e0b040' : '#6fbf73'}"></i></span>
-      <span class="bdst">${esc(d.officer.alive ? (d.officer.captured ? d.officer.name + ' (captured)' : d.officer.name) : d.officer.name + ' (slain)')} · ${esc(st)}</span></button>`;
+      <span class="bdst">${esc(d.officer.alive ? (d.officer.captured ? d.officer.name + ' (captured)' : d.officer.name) : d.officer.name + ' (slain)')} · ${d.pending ? '<b style="color:#ffd76a">' + GLYPH[d.pending.order] + '</b> ' : GLYPH[d.state] ? GLYPH[d.state] + ' ' : ''}${esc(st)}</span></button>`;
   }).join('');
 }
 function openOrders(div) {
@@ -274,7 +282,8 @@ function openOrders(div) {
   if (div.routed || B.aliveCount(div) <= 0) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = `<div class="bordtitle">${esc(div.unitName)} · ${esc(div.officer.name)}<button class="bbtn" data-b="closeorders">✕</button></div>
-    <div class="bordgrid">${Object.entries(ORDERS).map(([k, l]) => `<button class="bbtn ${div.state === k ? 'on' : ''}" data-b="order" data-o="${k}">${l}</button>`).join('')}</div>
+    <div class="bordgrid">${Object.entries(ORDERS).map(([k, l]) => `<button class="bbtn ${div.pending && div.pending.order === k ? 'pend' : !div.pending && div.state === k ? 'on' : ''}" data-b="order" data-o="${k}">${GLYPH[k]} ${l}</button>`).join('')}</div>
+    ${div.pending ? `<div class="sub" style="margin-top:6px;color:#ffd76a">Messenger riding with "${ORDERS[div.pending.order]}": about ${Math.max(0, div.pending.eta - B.t).toFixed(0)}s away.</div>` : ''}
     <div class="sub" style="margin-top:6px">Leadership ${div.officer.stats.lea}: a messenger takes about ${(Math.hypot(div.officer.x - B.sides[mySide].hq.x, div.officer.y - B.sides[mySide].hq.y) / (150 * (0.8 + div.officer.stats.lea * 0.025))).toFixed(1)}s to reach them.</div>`;
 }
 function showResult() {
@@ -315,14 +324,21 @@ function bindInput() {
     if (b === 'zoom') { const far = Math.max(0.35, innerWidth / FIELD.w * 1.05); if (cam.z > far + 0.1) { cam.z = far; cam.x = FIELD.w / 2; cam.y = FIELD.h / 2; } else cam.z = 1.5; }
     if (b === 'sel') { const d = B.divisions[+t.dataset.id]; openOrders(d); const c = d.c || B.centroid(d); cam.x = c.x; cam.y = c.y; }
     if (b === 'closeorders') { sel = null; root.querySelector('#border').hidden = true; }
-    if (b === 'order' && sel) { B.issue(sel, t.dataset.o); openOrders(sel); }
+    if (b === 'order' && sel) { B.issue(sel, t.dataset.o); openOrders(sel); toasts.push({ text: `Messenger rides to ${sel.officer.name}: ${ORDERS[t.dataset.o]}`, cls: 'strat', at: performance.now() }); }
   });
 }
 function tapAt(x, y) {
   const w = screenToWorld(x, y);
   if (targeting) { B.fireAttack(mySide, w.x, w.y); targeting = false; return; }
-  let best = null, bd = (40 / cam.z) ** 2 + 600;
-  for (const d of B.divisions) { if (d.side !== mySide || B.aliveCount(d) <= 0 || B.sides[mySide].ai) continue; for (const s of d.soldiers) { if (!s.alive || s.fled) continue; const dd = (s.x - w.x) ** 2 + (s.y - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } } }
+  let best = null, bd = (64 / cam.z) ** 2 + 900;
+  for (const d of B.divisions) {
+    if (d.side !== mySide || B.aliveCount(d) <= 0 || B.sides[mySide].ai) continue;
+    const c = d.c || B.centroid(d); const span = d.cols * d.spacing * 0.75;
+    const inBlock = (c.x - w.x) ** 2 + (c.y - w.y) ** 2 < span * span;
+    if (inBlock) { const dd = ((c.x - w.x) ** 2 + (c.y - w.y) ** 2) * 0.25; if (dd < bd) { bd = dd; best = d; } }
+    const o = d.officer; if (o.alive && !o.captured) { const dd = (o.x - w.x) ** 2 + (o.y - 20 - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } }
+    for (const s of d.soldiers) { if (!s.alive || s.fled) continue; const dd = (s.x - w.x) ** 2 + (s.y - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } }
+  }
   if (best) openOrders(best); else if (sel) { sel = null; root.querySelector('#border').hidden = true; }
 }
 function skipToEnd() { let n = 0; while (!B.over && n++ < 40000) B.step(1 / 30); }

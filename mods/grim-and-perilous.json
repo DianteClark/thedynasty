@@ -1,0 +1,12 @@
+{
+  "name": "Grim and Perilous",
+  "description": "More wars, hungrier monsters, harsher famines and more knives in the dark. The Aldmark are renamed the Westmarch.",
+  "tune": { "war": 1.6, "monsters": 1.5, "famine": 1.4, "plots": 1.8, "tournaments": 0.6 },
+  "cultures": {
+    "aldmark": {
+      "name": "Westmarch",
+      "p1": ["Grey", "Cold", "Iron", "Black", "Raven", "Wolf", "Ash", "Bleak"],
+      "p2": ["moor", "hold", "watch", "fell", "barrow", "gate", "keep", "cairn"]
+    }
+  }
+}

@@ -122,3 +122,21 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **Titles:** grant General, Marshal or Champion to your officers (Marshals and Generals lift morale in battle), or strip a rank (they won't forget).
 - **Heirs take after their parents:** children inherit traits from their mother and father.
 - **Your dynasty:** a family tree on the You tab and your line of succession.
+
+## 0.9: content and polish
+
+- **Instant loading:** saves are now snapshots of the whole world (stored in your browser's IndexedDB), so even a 200-year game opens in a fraction of a second. Older saves are converted once, automatically.
+- **Save slots:** up to three worlds, listed under ⚙ with Continue and Delete.
+- **Seed sharing:** copy your world's seed from ⚙ and give it to a friend.
+- **Mods:** load a JSON mod from ⚙ to rename cultures, change their name pools, and tune wars, monsters, famines, plots and tournaments. See `mods/grim-and-perilous.json` for the format:
+
+```json
+{
+  "name": "My mod",
+  "tune": { "war": 1.5, "monsters": 1.2, "famine": 1, "plots": 1, "tournaments": 1 },
+  "cultures": { "aldmark": { "name": "Westmarch", "p1": ["Grey", "Cold"], "p2": ["moor", "hold"], "m": ["Ed", "Os"], "me": ["ric"], "f": ["El"], "fe": ["wyn"] } }
+}
+```
+
+- **Balance:** settlements now have a carrying capacity by land type, granaries have limits, and large families grow more slowly, so worlds stay healthy for centuries; AI rulers turn surplus gold into soldiers.
+- **Battle controls:** easier division selection (tap the formation, a soldier, or the officer's banner) and clear orders: the order in flight pulses gold with a countdown, and an order icon floats over each of your divisions.

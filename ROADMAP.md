@@ -12,9 +12,9 @@ Each build is playable on its own and adds one layer. The order follows what eac
 | 0.6 ✅ | Ruling | Food, taxes, guard settings, recruiting, assigning officers to armies, delegation (steward, captain, spymaster), diplomacy: marriages, alliances, war, peace terms, wards |
 | 0.7 ✅ | Agents on the map | Spies, assassins, messengers, envoys, caravans and agitators as visible travelers you can intercept; rumors spreading town to town |
 | 0.8 ✅ | Dynasty depth | Title management, duels and tournaments you can watch, oaths, heirs with blended traits, history generated before turn one, end-of-run saga, "same world, new life" |
-| 0.9 | Content and polish | Dwarves, Wood Elves, Orcs and Lizardmen in battle, save slots, seed sharing, mod support, balance pass, polish backlog below |
+| 0.9 ✅ | Content and polish | Dwarves, Wood Elves, Orcs and Lizardmen in battle, save slots, seed sharing, mod support, balance pass, polish backlog below |
 
 ## Polish backlog
 
-- Battle: more forgiving tap targets when selecting divisions
-- Battle: highlight the order you just gave (button state plus a marker on the map)
+- ✅ Battle: more forgiving tap targets when selecting divisions
+- ✅ Battle: highlight the order you just gave (button state plus a marker on the map)

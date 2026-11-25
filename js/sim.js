@@ -43,11 +43,26 @@ const MON = Object.fromEntries(MONSTERS.map(m => [m.key, m]));
 const TRAITS = ['ambitious', 'honorable', 'greedy', 'reckless', 'cautious', 'cruel', 'kind', 'loyal', 'deceitful', 'brave', 'content'];
 const OPPOSITE = { ambitious: 'content', content: 'ambitious', honorable: 'deceitful', deceitful: 'honorable', reckless: 'cautious', cautious: 'reckless', cruel: 'kind', kind: 'cruel' };
 
+// Mods can rename cultures and change their name pools, and tune how often things happen.
+const ORIGINAL = JSON.parse(JSON.stringify(CULTURES));
+export function applyMod(mod) {
+  CULTURES.forEach((c, i) => Object.assign(c, JSON.parse(JSON.stringify(ORIGINAL[i]))));
+  if (!mod || !mod.cultures) return;
+  for (const [id, over] of Object.entries(mod.cultures)) {
+    const c = CULTURES.find(x => x.id === id); if (!c || typeof over !== 'object') continue;
+    for (const k of ['name', 'race', 'color']) if (typeof over[k] === 'string') c[k] = over[k].slice(0, 30);
+    for (const k of ['m', 'f', 'me', 'fe', 'p1', 'p2']) if (Array.isArray(over[k]) && over[k].length) c[k] = over[k].filter(x => typeof x === 'string').map(x => x.slice(0, 16)).slice(0, 60);
+  }
+}
+
 export class World {
-  constructor(seed = 'dynasty', size = 'large') {
+  constructor(seed = 'dynasty', size = 'large', mod = null) {
+    this.mod = mod || null;
+    this.tune = { war: 1, monsters: 1, famine: 1, plots: 1, tournaments: 1, ...(mod && mod.tune || {}) };
+    applyMod(mod);
     this.seed = String(seed);
     this.size = SIZES[size] ? size : 'large';
-    this.rand = mulberry32(hashStr(this.seed + '|' + this.size));
+    this.rs = hashStr(this.seed + '|' + this.size) | 0;
     this.year = 1; this.month = 0;
     this.nextId = 1;
     this.chars = new Map();
@@ -64,7 +79,7 @@ export class World {
   }
 
   // ---------- random helpers ----------
-  r() { return this.rand(); }
+  r() { let a = this.rs = (this.rs + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
   ri(a, b) { return a + Math.floor(this.r() * (b - a + 1)); }
   chance(p) { return this.r() < p; }
   pick(a) { return a[Math.floor(this.r() * a.length)]; }
@@ -117,7 +132,6 @@ export class World {
       const p = fits.length ? this.pick(fits) : this.pick(land);
       return { c, x: p.x, y: p.y };
     });
-    this.cultureCenters = centers;
     const cultureAt = (x, y) => {
       let best = null, bd = 1e9;
       for (const cc of centers) { const d = (cc.x - x) ** 2 + (cc.y - y) ** 2 - (cc.c.home.includes(this.grid[y][x]) ? 30 : 0); if (d < bd) { bd = d; best = cc.c; } }
@@ -332,7 +346,7 @@ export class World {
   // ---------- economy, seasons, famine ----------
   economy() {
     const harvest = this.month === 8;
-    const drought = harvest && this.chance(0.4) ? { x: this.ri(0, this.w), y: this.ri(0, this.h), r: this.ri(5, 11) } : null;
+    const drought = harvest && this.chance(Math.min(0.95, 0.4 * this.tune.famine)) ? { x: this.ri(0, this.w), y: this.ri(0, this.h), r: this.ri(5, 11) } : null;
     const yieldOf = { plains: 1.3, forest: 1.1, swamp: 1.0, wasteland: 0.85, tundra: 0.85, mountain: 0.85 };
     for (const s of this.setts) {
       if (s.destroyed) continue;
@@ -350,7 +364,12 @@ export class World {
         }
         s.pop = Math.max(20, Math.round(s.pop * 0.985)); s.unrest += 2; s.food = Math.max(s.food, -s.pop * 0.1);
       } else if (s.famine && s.food > s.pop * 0.05) { s.famine = false; s.aided = false; }
-      else if (s.food > 0) s.pop = Math.round(s.pop * (1 + 0.0015 * (s.biome === 'plains' ? 1.3 : 1)));
+      else if (s.food > 0) {
+        // the land can only feed so many: growth slows toward its capacity
+        const r0 = this.realm(s.realmId); const cap = ({ plains: 2400, forest: 1700, swamp: 1300, wasteland: 1100, tundra: 1000, mountain: 1100 }[s.biome] || 1500) * (r0 && r0.capital === s.id ? 1.6 : 1);
+        s.pop = Math.max(20, Math.round(s.pop * (1 + 0.0016 * (s.biome === 'plains' ? 1.3 : 1) * (1 - s.pop / cap))));
+      }
+      s.food = Math.min(s.food, s.pop * 0.45); // granaries only hold so much
       if (r) r.treasury += s.pop * 0.004 * (1 + ((this.steward(r) || this.char(r.rulerId))?.stats.pol || 5) / 20) * (r.tax === 'low' ? 0.6 : r.tax === 'high' ? 1.5 : 1) - GUARD[s.guard].cost * 0.2;
     }
     if (this.month % 2 === 1) for (const r of this.realmList()) this.stewardWork(r);
@@ -451,7 +470,7 @@ export class World {
   monsters() {
     for (const L of this.lairs) {
       if (!L.alive) continue;
-      L.strength += this.r() * 0.6 * (this.season === 'Winter' ? 0.5 : 1);
+      L.strength += this.r() * 0.6 * (this.season === 'Winter' ? 0.5 : 1) * this.tune.monsters;
       if (L.strength > 55 && this.chance(0.04)) {
         const targets = this.setts.filter(s => !s.destroyed && this.dist(s, L) < 9).sort((a, b) => this.dist(a, L) - this.dist(b, L));
         const s = targets[0]; if (!s) continue;
@@ -568,7 +587,7 @@ export class World {
       const ruler = this.char(r.rulerId); if (!ruler || ruler.prisonerOf || this.isPlayer(ruler)) continue;
       if (this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id))) continue;
       const aggro = (this.has(ruler, 'ambitious') ? 2 : 1) * (this.has(ruler, 'content') ? 0.3 : 1) * (this.has(ruler, 'reckless') ? 1.5 : 1) * (this.has(ruler, 'cautious') ? 0.6 : 1);
-      if (!this.chance(0.006 * aggro)) continue;
+      if (!this.chance(0.006 * aggro * this.tune.war)) continue;
       const myStr = this.realmStrength(r);
       const targets = this.neighbours(r).filter(o => !r.allies.has(o.id) && !((r.truce.get(o.id) || 0) > this.year) && this.realmStrength(o) < myStr * (this.has(ruler, 'reckless') ? 1.3 : 0.9));
       if (!targets.length) continue;
@@ -963,7 +982,7 @@ export class World {
       }
     }
     // assassination plots: ambitious claimants and bitter enemies
-    if (this.chance(0.12)) {
+    if (this.chance(Math.min(0.9, 0.12 * this.tune.plots))) {
       const plotters = this.living().filter(c => !c.prisonerOf && !this.isPlayer(c) && this.age(c) >= 18 && (this.has(c, 'ambitious') || this.has(c, 'deceitful')) && c.stats.int >= 8);
       const p = plotters.length ? this.pick(plotters) : null;
       if (p) {
@@ -1022,7 +1041,7 @@ export class World {
     for (const r of this.realmList()) {
       const asked = r.hostTournament; r.hostTournament = false;
       if (this.isPlayer(this.char(r.rulerId)) && !asked) continue;
-      if (!asked && (r.tier === 'Village' || r.treasury < 150 || this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id)) || !this.chance(0.15))) continue;
+      if (!asked && (r.tier === 'Village' || r.treasury < 150 || this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id)) || !this.chance(Math.min(0.9, 0.15 * this.tune.tournaments)))) continue;
       r.tourney = true;
       const cap = this.sett(r.capital), p = this.player;
       if (p && p.alive && !p.prisonerOf && cap && (this.dist(p, cap) < 15 || this.isPlayer(this.char(r.rulerId)))) this.you(`Heralds announce a tournament at ${cap.name} in Highsun. Enter it from the You tab.`, [], 1);
@@ -1081,7 +1100,7 @@ export class World {
       // births
       if (c.female && c.spouseId && a >= 17 && a <= 42) {
         const sp = this.char(c.spouseId);
-        if (sp && sp.alive && this.chance(0.011)) {
+        if (sp && sp.alive && this.chance(c.children.length >= 4 ? 0.004 : 0.011)) {
           const dyn = c.noble ? (sp.role === 'ruler' || !c.dynasty ? sp.dynasty : c.dynasty) : sp.dynasty;
           const k = this.makeChar({ culture: this.chance(0.5) ? c.culture : sp.culture, age: 0, role: 'child', dynasty: dyn || c.dynasty, noble: c.noble || sp.noble });
           this.setParents(k, sp.role === 'ruler' ? sp : c, sp.role === 'ruler' ? c : sp);
@@ -1182,7 +1201,7 @@ export class World {
         }
         continue;
       }
-      if (this.chance(s.pop / 9000)) {
+      if (this.living().length < this.setts.length * 9 && this.chance(s.pop / 9000)) {
         const c = this.makeChar({ culture: s.culture, age: this.ri(16, 24), role: this.chance(0.2) ? 'bandit' : 'vagabond' });
         c.settId = s.id; c.x = s.x; c.y = s.y; if (c.role === 'bandit') c.band = this.ri(5, 15);
       }
@@ -1504,10 +1523,10 @@ export class World {
     const sm = r ? this.spymaster(r) : null;
     const sense = (sm ? sm.stats.int : p.stats.int) + this.living().filter(x => x.companionOf === p.id).length * 2;
     const warned = this.chance(Math.min(0.9, 0.15 + sense * 0.035));
-    const plot = { by: plotter.id, due: this.monthIndex + 99, warned, disguise: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest', 'a fellow traveler']), settId: p.settId };
+    const plot = { id: this.id(), by: plotter.id, due: this.monthIndex + 99, warned, disguise: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest', 'a fellow traveler']), settId: p.settId };
     (this.plots || (this.plots = [])).push(plot);
     const from = this.sett(plotter.settId) || this.sett(this.realm(plotter.realmId)?.capital) || this.pick(this.setts.filter(s => !s.destroyed));
-    const ag = this.spawnAgent('assassin', plotter.realmId, from, this.sett(p.settId) || this.sett(this.realm(p.realmId)?.capital), { by: plotter.id, target: p.id, plot, cover: plot.disguise, culture: plotter.culture, follow: p.role === 'vagabond' ? null : null });
+    const ag = this.spawnAgent('assassin', plotter.realmId, from, this.sett(p.settId) || this.sett(this.realm(p.realmId)?.capital), { by: plotter.id, target: p.id, plotId: plot.id, cover: plot.disguise, culture: plotter.culture, follow: p.role === 'vagabond' ? null : null });
     if (ag) plot.agentId = ag.id; else plot.due = this.monthIndex + 3;
     if (warned) this.you(`${sm && sm.id !== p.id ? `Your spymaster ${sm.name} hears` : 'You hear'} whispers of a plot against your life${sense > 14 ? `. The trail leads to ${this.fullName(plotter)}` : ''}. ${this.playerRules() ? 'Tightening the guard may save you.' : 'Moving on may save you.'}`, sense > 14 ? [plotter.id] : [], 3);
   }
@@ -1905,7 +1924,7 @@ export class World {
     if (a.kind === 'assassin') {
       const by = this.char(a.data.by), t = this.char(a.data.target);
       if (!by || !t || !t.alive) return;
-      if (this.isPlayer(t)) return this.resolvePlayerPlot(a.data.plot);
+      if (this.isPlayer(t)) return this.resolvePlayerPlot((this.plots || []).find(x => x.id === a.data.plotId));
       if (this.dist(t, a) > 2.5) { if (this.isPlayer(by)) this.you(`Your assassin reaches ${dest.name || 'their mark'}, but ${t.name} is not there.`, [t.id], 1); return; }
       return this.assassination(by, t, a.data.motive || 'for gold');
     }
@@ -2072,6 +2091,29 @@ export class World {
     const old = c.titles.rank; c.titles.rank = null; for (const k of ['stewardId', 'captainId', 'spymasterId']) if (r[k] === c.id) r[k] = null;
     c.loyalty = Math.max(0, (c.loyalty || 60) - 25); this.opine(c, this.player, -30);
     this.you(`You strip ${this.fullName(c)} of the rank of ${old}. They will not forget it.`, [c.id], 2); return `${c.name} is ${old} no more.`;
+  }
+
+  // ---------- 0.9 snapshots: save the whole world, load it instantly ----------
+  toJSON() {
+    const o = {};
+    for (const [k, v] of Object.entries(this)) {
+      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', '_own'].includes(k) || typeof v === 'function') continue;
+      o[k] = v;
+    }
+    o.chars = [...this.chars.values()];
+    o.realms = [...this.realms.values()].map(r => ({ ...r, setts: [...r.setts], allies: [...r.allies], truce: [...r.truce.entries()] }));
+    o.v = 1;
+    return o;
+  }
+  static restore(o) {
+    const w = Object.create(World.prototype);
+    Object.assign(w, o);
+    w.chars = new Map(o.chars.map(c => [c.id, c]));
+    w.realms = new Map(o.realms.map(r => [r.id, { ...r, setts: new Set(r.setts), allies: new Set(r.allies), truce: new Map(r.truce) }]));
+    w.pendingBattle = null; w.replaying = false; w.replayLog = null;
+    applyMod(w.mod); if (!w.tune) w.tune = { war: 1, monsters: 1, famine: 1, plots: 1, tournaments: 1 };
+    delete w.v;
+    return w;
   }
 
   // ---------- views ----------
