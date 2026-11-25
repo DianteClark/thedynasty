@@ -10,7 +10,7 @@
     body { padding: 0; overflow: hidden; touch-action: none; }
     #st { position: fixed; inset: 0; image-rendering: pixelated; }
     .hud { position: fixed; left: 8px; right: 8px; top: calc(8px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 6px; z-index: 2; }
-    .meter { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+    .meter { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
     .meter div { background: rgba(22,18,13,.88); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
     .meter b { display: block; font-family: var(--serif); font-size: 20px; color: var(--gold); }
     .meter b.bad { color: #e2553f; } .meter b.ok { color: #e0b040; }
@@ -29,22 +29,24 @@
       <div><b id="fps">–</b><small>FPS</small></div>
       <div><b id="sim">–</b><small>sim ms/frame</small></div>
       <div><b id="draw">–</b><small>draw ms/frame</small></div>
-      <div><b id="troops">–</b><small>troops (on screen)</small></div>
+      <div><b id="troops">–</b><small>troops alive</small></div>
+      <div><b id="awake">–</b><small>awake</small></div>
     </div>
     <div class="row"><a class="bbtn" href="./">← Game</a><button class="bbtn" id="stop" hidden>■ Stop</button><span class="bbtn" id="status" style="pointer-events:none">Pick options, then Start test</span></div>
   </div>
   <div class="panel">
-    <div class="sub"><b>1. Troops on the field</b></div>
+    <div class="sub"><b>1. Troops on the field</b> (total, both sides)</div>
     <div class="row" style="margin-top:6px" id="presets"></div>
-    <div class="sub" style="margin-top:10px"><b>2. Camera</b> (how much of the battle is drawn at once)</div>
+    <div class="sub" style="margin-top:10px"><b>2. Bases per side</b> (front rows → main camp). Half of each side's troops guard them, asleep until enemies come close, up to 5,000 a base.</div>
+    <div class="row" style="margin-top:6px" id="layouts"></div>
+    <div class="sub" style="margin-top:10px"><b>3. Camera</b></div>
     <div class="row" style="margin-top:6px">
       <button class="chip" data-cam="close">Close-up</button>
       <button class="chip on" data-cam="mid">Mid</button>
-      <button class="chip" data-cam="far">Whole field</button>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn" id="go" style="margin:0">Start test</button></div>
     <div id="results"></div>
-    <p class="note">Each test lets the armies clash for 2 seconds, then measures for 5. The battle keeps running afterwards so you can look around (drag to pan). Screenshot the table and send it over.</p>
+    <p class="note">Each test lets the armies close for 2 seconds, then measures for 15 (long enough for officers to hit the bases and wake garrisons). "Peak awake" is the most troops fighting at once. The battle keeps running afterwards so you can look around (drag to pan). Screenshot the table and send it over.</p>
   </div>
   <script type="module" src="js/stress.js"></script>
 </body>

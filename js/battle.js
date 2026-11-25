@@ -51,19 +51,22 @@ export class Battle {
         const lvl = 1 + 0.06 * ((d.level || 1) - 1);
         const mods = side.mods || {};
         const mult = (1 + 0.22 * tier) * lvl;
-        const y = this.fh * (k + 1) / (n + 1);
+        const y0 = this.fh * (k + 1) / (n + 1);
         const back = role === 'ranged' || role === 'magic' ? 60 : 0;
-        const x = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
+        const gar = d.garrison || null;
+        const x0 = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
+        const x = gar ? gar.x : x0, y = gar ? gar.y : y0;
         const div = {
           id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
           stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
-          level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: true, captured: false },
+          level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: !gar, captured: false },
+          garrison: gar ? { x, y, leash: gar.leash || 380, quiet: 0 } : null, dormant: !!gar, base: gar ? gar.base : null,
           cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5 + (mods.morale || 0),
           start: d.count, dead: 0, fled: 0, routed: false, rallied: 0, flankPhase: 0, chargeT: 0, lastHit: -9, inCombat: false, contactT: 0, color: side.color,
         };
         div.morale = div.baseMorale;
-        const cols = Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
-        div.cols = cols; div.spacing = role === 'cav' || role === 'heavy' ? 15 : 12;
+        const cols = gar ? Math.max(6, Math.round(Math.sqrt(d.count))) : Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
+        div.cols = cols; div.spacing = gar ? 10 : role === 'cav' || role === 'heavy' ? 15 : 12;
         div.soldiers = [];
         for (let i = 0; i < d.count; i++) {
           const s = { div, side: side.index, slot: i, x: 0, y: 0, hp: div.stats.hp, cd: this.r() * R.cd, target: null, anim: 0, at: this.r() * 4, dying: 0, alive: true, fled: false, vx: 0, vy: 0 };
@@ -146,7 +149,7 @@ export class Battle {
       if (d < 8) { this.messengers.splice(this.messengers.indexOf(m), 1); if (!m.div.routed) this.applyOrder(m.div, m.order); continue; }
       m.x += dx / d * m.speed * dt; m.y += dy / d * m.speed * dt;
     }
-    for (const div of this.divisions) div.c = this.centroid(div);
+    for (const div of this.divisions) div.c = div.dormant ? { x: div.garrison.x, y: div.garrison.y } : this.centroid(div);
     for (const div of this.divisions) this.updateDivision(div, dt);
     for (const s of this.soldiers) this.updateSoldier(s, dt);
     this.updateProjectiles(dt);
@@ -187,6 +190,7 @@ export class Battle {
     const alive = this.aliveCount(div);
     if (alive <= 0) { if (!div.gone) { div.gone = true; } return; }
     const c = div.c || this.centroid(div);
+    if (div.garrison) { if (this.garrisonTick(div, c, alive)) return; }
     // officer follows behind the formation
     const o = div.officer;
     if (o.alive && !o.captured) {
@@ -209,11 +213,15 @@ export class Battle {
     // movement target for the formation center
     const enemies = this.enemiesOf(div.side);
     let target = null, td = 1e9;
-    for (const e of enemies) { const ec = this.centroid(e); const d = Math.hypot(ec.x - c.x, ec.y - c.y); if (d < td) { td = d; target = { div: e, c: ec }; } }
+    for (const e of enemies) { const ec = e.c || this.centroid(e); const d = Math.hypot(ec.x - c.x, ec.y - c.y); if (d < td) { td = d; target = { div: e, c: ec }; } }
     if (target) div.facing = target.c.x > c.x ? 1 : -1;
     let goal = null, speedMul = 1;
+    if (div.garrison) { // unled defenders: fight what comes close, never chase far from their base
+      const G = div.garrison;
+      if (target && Math.hypot(target.c.x - G.x, target.c.y - G.y) < G.leash) goal = target.c; else goal = G;
+    }
     const ranged = div.role === 'ranged' || div.role === 'magic';
-    switch (div.state) {
+    if (!div.garrison) switch (div.state) {
       case 'hold': goal = null; break;
       case 'advance': if (target) goal = ranged && td < div.stats.range * 0.85 ? null : target.c; break;
       case 'charge': if (target) { goal = target.c; speedMul = div.role === 'cav' ? 1.35 : 1.15; } break;
@@ -234,6 +242,26 @@ export class Battle {
     div.cx = Math.max(30, Math.min(this.fw - 30, div.cx)); div.cy = Math.max(30, Math.min(this.fh - 30, div.cy));
   }
 
+  // returns true while the garrison sleeps (skip the rest of the division update)
+  garrisonTick(div, c, alive) {
+    const G = div.garrison;
+    if (div.dormant) {
+      if (this.t - div.lastHit < 1 || (this.steps + div.id) % 10 === 0 && this.nearestEnemy({ x: G.x, y: G.y, side: div.side }, div.cols * div.spacing * 0.7 + 180)) {
+        div.dormant = false; G.quiet = 0; this.wakes = (this.wakes || 0) + 1;
+        this.log(`The garrison of ${div.base || 'a base'} takes up arms!`, div.side, 'strat');
+        return false;
+      }
+      return true;
+    }
+    // awake: go back to sleep after a quiet spell at home (checked every 10 steps)
+    if ((this.steps + div.id) % 10 === 0) {
+      const busy = this.t - div.lastHit < 2 || Math.hypot(c.x - G.x, c.y - G.y) > 40 || this.nearestEnemy({ x: G.x, y: G.y, side: div.side }, div.cols * div.spacing * 0.7 + 220);
+      G.quiet = busy ? 0 : G.quiet + 1;
+      if (G.quiet > 6) { div.dormant = true; div.cx = G.x; div.cy = G.y; }
+    }
+    return false;
+  }
+
   rout(div) {
     div.routed = true; div.routedAt = this.t; div.state = 'rout'; div.morale = Math.min(div.morale, 10);
     this.log(`The ${div.unitName} of ${div.officer.name} break and flee!`, div.side, 'bad');
@@ -244,6 +272,7 @@ export class Battle {
     if (!s.alive) { if (s.dying > 0) { s.dying -= dt; s.at += dt * 8; if (s.dying <= 0) this.corpses.push(s); } return; }
     if (s.fled) return;
     const div = s.div, st = div.stats;
+    if (div.dormant) { s.at += dt * 3; s.anim = 0; return; } // asleep behind the walls: nearly free
     s.cd -= dt; s.at += dt * 6;
     if (s.hitT > 0) s.hitT -= dt;
     if (div.routed) {
@@ -359,11 +388,11 @@ export class Battle {
   // ---------- enemy general ----------
   ai(side) {
     if (!side.nextThink || this.t >= side.nextThink) side.nextThink = this.t + 2.5; else return;
-    const mine = this.divisions.filter(d => d.side === side.index && !d.routed && this.aliveCount(d) > 0);
+    const mine = this.divisions.filter(d => d.side === side.index && !d.routed && !d.garrison && this.aliveCount(d) > 0);
     const foes = this.enemiesOf(side.index);
     if (!foes.length) return;
     const style = side.ai;
-    const closest = d => Math.min(...foes.map(f => { const a = this.centroid(f), b = this.centroid(d); return Math.hypot(a.x - b.x, a.y - b.y); }));
+    const closest = d => Math.min(...foes.map(f => { const a = f.c || this.centroid(f), b = d.c || this.centroid(d); return Math.hypot(a.x - b.x, a.y - b.y); }));
     for (const d of mine) {
       if (d.pending) continue;
       const near = closest(d);
