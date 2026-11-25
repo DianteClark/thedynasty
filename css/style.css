@@ -218,3 +218,10 @@ button.card { width: 100%; text-align: left; color: var(--ink); font: inherit; d
 .away { border-color: #e0b040; }
 .subtabs { display: flex; gap: 6px; margin-bottom: 10px; }
 #tabs i { font-style: normal; }
+
+/* 2.7 ceremony scenes */
+.scene { position: fixed; inset: 0; z-index: 60; background: rgba(10,8,6,.94); display: flex; flex-direction: column; align-items: center; padding: calc(16px + env(safe-area-inset-top, 0px)) 12px calc(16px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
+.scene canvas { width: min(100%, 540px); aspect-ratio: 360 / 210; image-rendering: pixelated; border: 2px solid var(--gold); border-radius: 10px; flex: none; }
+.scenetext { width: min(100%, 540px); margin-top: 12px; }
+.scenetext h2 { margin: 0 0 6px; color: var(--gold); }
+.scenetext .abtns { margin-top: 12px; display: grid; gap: 8px; }

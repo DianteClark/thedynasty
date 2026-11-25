@@ -3,7 +3,7 @@
 // Ruling happens at your seat: while you're away, your steward rules in your place.
 
 // actions that need you to be holding court at your seat
-export const COURT_ACTS = ['tax', 'guard', 'guardAuto', 'levy', 'fortify', 'recruit', 'appoint', 'grain', 'tournament', 'war', 'peaceTerms', 'arrange', 'ward', 'spy', 'agitate', 'smear', 'assassin', 'persuade', 'grant', 'revoke', 'transfer'];
+export const COURT_ACTS = ['feast', 'tax', 'guard', 'guardAuto', 'levy', 'fortify', 'recruit', 'appoint', 'grain', 'tournament', 'war', 'peaceTerms', 'arrange', 'ward', 'spy', 'agitate', 'smear', 'assassin', 'persuade', 'grant', 'revoke', 'transfer'];
 
 export function installCourt(World) {
   const P = World.prototype;

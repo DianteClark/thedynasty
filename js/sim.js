@@ -6,6 +6,7 @@ import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from
 import { installKnowledge } from './know.js';
 import { installCourt, COURT_ACTS, HANDLERS } from './court.js';
 import { installEvents, resolveEvent } from './events.js';
+import { installCeremonies, resolveCeremony } from './ceremonies.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -406,7 +407,7 @@ export class World {
     this.playerTick();
     this.monthlyLife();
     if (this.kn) this.knowledgeTick();
-    if (this.playerId) { this.jobsTick(); this.councilTick(); this.eventsTick(); this.decisionsTick(); }
+    if (this.playerId) { this.jobsTick(); this.ceremoniesTick(); this.councilTick(); this.eventsTick(); this.decisionsTick(); }
     if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
@@ -1409,6 +1410,7 @@ export class World {
   marry(a, b, silent) {
     a.spouseId = b.id; b.spouseId = a.id; this.opine(a, b, 30); this.opine(b, a, 30);
     if (silent) return;
+    if (this.playerId) this.onMarriage(a, b);
     this.stats.marriages++;
     const ra = this.realm(a.realmId), rb = this.realm(b.realmId);
     // a commoner marrying into nobility joins that house
@@ -1515,7 +1517,9 @@ export class World {
       this.pickHeir(r);
     } else if (c.fame > 25 || c.titles.deed) this.log(2, 'death', `${this.fullName(c)} dies (${cause}).${c.titles.deed ? ` The ${c.titles.deed} passes into legend.` : ''}`, [c.id]);
     for (const b of c.oath) { const bb = this.char(b); if (bb && bb.alive) { this.opine(bb, c, 10); } }
-    if (this.isPlayer(c)) this.playerDied(c, cause);
+    const wasPlayer = this.isPlayer(c);
+    if (wasPlayer) this.playerDied(c, cause);
+    if (this.playerId) this.onDeath(c, wasPlayer);
     if (c.mercId) { const m = this.mercs.find(x => x.id === c.mercId); if (m) { const vets = this.living().filter(x => x.role === 'vagabond' && this.dist(x, c) < 8); const nc = vets[0] || this.makeChar({ culture: c.culture, age: this.ri(25, 40), role: 'merc' }); nc.role = 'merc'; nc.mercId = m.id; m.captainId = nc.id; } }
   }
 
@@ -1859,7 +1863,7 @@ export class World {
     if (p.oath.length) return 'You are already sworn.';
     if (this.op(o, p) + p.stats.cha + this.r() * 30 < 45) { this.opine(o, p, -5); return `${o.name} is not ready to bind their fate to yours.`; }
     p.oath = [o.id]; o.oath = [p.id]; this.opine(o, p, 40); this.opine(p, o, 40);
-    this.you(`You and ${this.fullName(o)} swear an oath of brotherhood, to live and die as one.`, [o.id], 2); return `You are sworn to ${o.name}.`;
+    this.you(`You and ${this.fullName(o)} swear an oath of brotherhood, to live and die as one.`, [o.id], 2); this.onOath(o); return `You are sworn to ${o.name}.`;
   }
   act_rebel() {
     const p = this.player, r = this.playerRealm(); if (!r || p.role !== 'officer') return 'You have no one to rebel against.';
@@ -2288,7 +2292,7 @@ export class World {
     if (a.title === 'Marshal') for (const o of this.realmOfficers(r)) if (o.titles.rank === 'Marshal') o.titles.rank = null;
     for (const k of ['stewardId', 'captainId', 'spymasterId']) if (r[k] === c.id) r[k] = null;
     c.titles.rank = a.title; c.loyalty = Math.min(100, (c.loyalty || 60) + 15); this.opine(c, this.player, 15);
-    this.you(`You name ${this.fullName(c)} ${a.title}.`, [c.id], 1); return `${c.name} is your ${a.title}.`;
+    this.you(`You name ${this.fullName(c)} ${a.title}.`, [c.id], 1); this.onKnighting(c, a.title); return `${c.name} is your ${a.title}.`;
   }
   act_revoke(a) {
     const r = this.playerRealm(), c = this.char(a.id); if (!c || !c.titles.rank) return 'They hold no rank.';
@@ -2334,3 +2338,5 @@ installKnowledge(World);
 installCourt(World);
 installEvents(World);
 HANDLERS.event = resolveEvent;
+installCeremonies(World);
+HANDLERS.ceremony = resolveCeremony;

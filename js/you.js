@@ -2,6 +2,7 @@
 import { CULTURES, cultureById } from './names.js';
 import { SIZES, MON, MONTHS } from './sim.js';
 import { portrait } from './portrait.js';
+import { sceneVerb } from './sceneview.js';
 import { UNITS } from './battle.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -140,6 +141,7 @@ function actions(w, p, r, rules) {
       <div class="sub" style="margin-top:6px">Guard at ${esc(w.sett(r.capital)?.name || 'your seat')}: tighter guards catch more assassins, cost gold and stir unrest.</div>
       <div class="chips">${['Light', 'Watchful', 'Locked Down'].map(l => `<button class="chip ${(r.guardChoice || 'Light') === l ? 'on' : ''}" data-act='${JSON.stringify({ type: 'guard', level: l })}'>${l}</button>`).join('')}</div>
       ${hire.length ? `<div class="sub" style="margin-top:6px">Wanderers who would serve you (40 gold):</div><div class="abtns">${hire.map(v => btn(`${esc(v.name)} (Lead ${v.stats.lea}, Might ${v.stats.mig})`, { type: 'recruit', id: v.id })).join('')}</div>` : ''}
+      <div class="arow"><div><b>Hold a feast</b><div class="sub">50 gold, at most twice a year. Your officers drink to your name, unless someone at the table has other ideas.</div></div>${btn('Feast', { type: 'feast' })}</div>
       ${r.tier !== 'Village' ? `<div class="arow"><div><b>Host a tournament</b><div class="sub">80 gold. Fame, marriage offers, and a crowd an assassin could hide in.</div></div>${btn('Host', { type: 'tournament' })}</div>` : ''}</div>`;
     h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r);
     h += `<div class="card"><h3>⚔ War and peace</h3>
@@ -166,7 +168,7 @@ export function decisionCard(w, d, canAct) {
   const when = d.court && !w.atSeat() ? 'Your steward will settle this if you stay away' : left <= 0 ? 'Decide now' : `Decide within ${left} month${left === 1 ? '' : 's'} (by ${MONTHS[(w.month + left) % 12]})`;
   return `<div class="card dcard ${left <= 1 ? 'late' : ''}">${who ? portrait(who, 44) : '<span class="portrait" style="width:44px;height:44px;display:grid;place-items:center;font-size:22px">📜</span>'}
     <div><h3>${esc(d.title)}</h3><div class="when">${esc(when)}</div><div class="sub" style="margin-top:4px">${esc(d.text)}</div></div>
-    <div class="abtns">${d.options.map(o => `<button class="abtn" ${canAct ? `data-act='${esc(JSON.stringify({ type: 'decide', id: d.id, choice: o.id }))}'` : 'disabled'}>${esc(o.label)}</button>`).join('')}</div></div>`;
+    <div class="abtns">${d.kind === 'ceremony' ? `<button class="abtn" data-scene="${d.id}">${esc(sceneVerb(d))}</button>` : d.options.map(o => `<button class="abtn" ${canAct ? `data-act='${esc(JSON.stringify({ type: 'decide', id: d.id, choice: o.id }))}'` : 'disabled'}>${esc(o.label)}</button>`).join('')}</div></div>`;
 }
 export function renderCourt(view, w) {
   if (!w || !w.playerId || w.gameOver) return renderYou(view, w);

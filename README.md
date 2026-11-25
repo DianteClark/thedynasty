@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.6
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.7
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -226,4 +226,15 @@ Something now needs you every couple of minutes, wherever you are. Each one is a
 - **At court:** envoys offering alliance, the merchants' guild asking for a charter, a peasant accusing one of your officers, two officers feuding over the vanguard, a renowned wanderer asking to serve, a shrine for the people, refugees at the gate, a bandit chief offering to swear fealty.
 - **In camp:** a merchant hiring guards, a tavern brawl, dice by the fire, veterans offering to drill your troops, gifts from fellow officers, and, if you serve a lord, orders you can obey or refuse.
 - Your Charisma, Intellect and Might decide how some of them go.
+
+## 2.7: ceremonies
+
+The big moments of a life are now small scenes, drawn in HAS art in front of your realm's own castle, with the people involved (and their portraits) and a choice that matters. They wait under 📜 like any matter: tap **Attend** when you're ready.
+
+- **Coronation:** when you take a throne, your officers swear to you one by one. If one refuses to kneel, demand their oath (Charisma against theirs), strip their rank before everyone, or let it pass.
+- **Weddings:** yours or your children's. A lavish feast wins hearts and fame; inviting your rivals can soften old grudges.
+- **Funerals:** for your spouse, children, parents, sworn sibling and the ruler you succeed. A grand funeral calms the realm; if they were killed, you can swear vengeance over the grave.
+- **Oath-swearing:** seal a brotherhood in blood for a bond that only death breaks.
+- **Knighting:** when you grant a rank, the officer kneels before the court; gift a warhorse and they'll remember it.
+- **Feasts:** hold one from the Court (50 gold, twice a year at most). Usually your officers drink to your name. Sometimes a rival mocks you before the hall: duel them, answer with wit, or have them thrown out.
 

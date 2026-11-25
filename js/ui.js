@@ -4,6 +4,7 @@ import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle }
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
 import { renderYou, renderCreation, readForm, handleFormClick, setStance, renderCourt, decisionCard } from './you.js';
 import { portrait } from './portrait.js';
+import { openScene } from './sceneview.js';
 import { watchDuels } from './duelview.js';
 import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod, setMod, MAX_SLOTS } from './store.js';
 
@@ -446,7 +447,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v2.6. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.7. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 
@@ -468,6 +469,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.watchDuel) { const e = world.chronicle[+t.dataset.watchDuel]; return watchDuels(e.duels, e.duels.length > 1 ? 'The tournament' : 'A duel'); }
   if (t.dataset.act) { const a = JSON.parse(t.dataset.act); if (t.dataset.confirm && !window.confirm(t.dataset.confirm)) return; return doAct(a); }
   if (t.dataset.tab) { if (tab === 'map' && t.dataset.tab !== 'map') unmountMap(); tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
+  if (t.dataset.scene) { const d = (world.decisions || []).find(x => x.id === +t.dataset.scene); if (!d) return; closeSheet(); return openScene(world, d, choice => doAct({ type: 'decide', id: d.id, choice })); }
   if (t.dataset.wsub) { ui.worldSub = t.dataset.wsub; return renderWorld(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
   if (t.dataset.type) { ui.type = t.dataset.type; ui.shown = 60; return renderChronicle(); }
