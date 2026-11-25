@@ -255,6 +255,7 @@ export class World {
   }
   unitName(a) { return a && a.faction && UNITS[a.faction][a.unit] ? UNITS[a.faction][a.unit].name : 'troops'; }
   plural(n) {
+    if (/Shaman$/.test(n)) return n + 's';
     if (/man$/.test(n)) return n.replace(/man$/, 'men');
     if (/(Deer|Djinn|Naga)$/.test(n)) return n;
     if (/Dwarf$/.test(n)) return n.replace(/Dwarf$/, 'Dwarves');
@@ -565,8 +566,9 @@ export class World {
       const A = this.realm(w.a), B = this.realm(w.b);
       if (!A || !B || !A.alive || !B.alive) { w.over = true; continue; }
       w.months++;
-      if (this.season === 'Winter' && this.chance(0.5)) continue; // winter slows campaigns
-      if (this.chance(0.3)) this.campaign(w, A, B);
+      if (w.march) { this.marchStep(w); }
+      else if (this.season === 'Winter' && this.chance(0.5)) continue; // winter slows campaigns
+      else if (this.chance(0.3)) this.campaign(w, A, B);
       if (w.over) continue;
       const exhausted = w.months > 36 || Math.abs(w.score) > 8 || (w.months > 14 && this.chance(0.04));
       if (exhausted) this.makePeace(w, A, B);
@@ -607,7 +609,30 @@ export class World {
     if (!aOff.length) return;
     const targets = this.realmSetts(def).sort((x, y) => Math.min(...this.realmSetts(att).map(s => this.dist(s, x))) - Math.min(...this.realmSetts(att).map(s => this.dist(s, y))));
     const target = targets[0]; if (!target) { w.over = true; return; }
-    this.battle(att, def, aOff, dOff, target, w, attackerIsA);
+    // the host gathers at the nearest friendly holding and marches on the target
+    const home = this.realmSetts(att).sort((x, y) => this.dist(x, target) - this.dist(y, target))[0] || this.sett(att.capital);
+    const m = { att: att.id, def: def.id, attackerIsA, officers: aOff.map(o => o.id), target: target.id, x: home.x, y: home.y, sx: home.x, sy: home.y, started: this.year * 12 + this.month };
+    w.march = m;
+    for (const o of aOff) { o.x = m.x; o.y = m.y; }
+    if (this.dist(home, target) > 3 && this.chance(0.5)) this.log(1, 'war', `The host of ${att.name} marches from ${home.name} on ${target.name}${aOff[0] ? `, led by ${this.fullName(aOff[0])}` : ''}.`, aOff.map(o => o.id));
+    this.marchStep(w);
+  }
+
+  marchStep(w) {
+    const m = w.march; const att = this.realm(m.att), def = this.realm(m.def), target = this.sett(m.target);
+    if (!att || !def || !att.alive || !def.alive || !target || target.destroyed || target.realmId !== def.id) { w.march = null; return; }
+    const offs = m.officers.map(id => this.char(id)).filter(o => o && o.alive && !o.prisonerOf && o.realmId === att.id && o.army);
+    if (!offs.length) { w.march = null; return; }
+    const g = this.grid[Math.max(0, Math.min(this.h - 1, Math.round(m.y)))]?.[Math.max(0, Math.min(this.w - 1, Math.round(m.x)))];
+    let speed = this.season === 'Winter' ? 1.6 : 3.2;
+    if (g === 'swamp' || g === 'mountain') speed *= 0.6;
+    if (g === 'forest') speed *= 0.8;
+    const dx = target.x - m.x, dy = target.y - m.y, d = Math.hypot(dx, dy);
+    if (d > speed) { m.x += dx / d * speed; m.y += dy / d * speed; for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
+    m.x = target.x; m.y = target.y; w.march = null;
+    const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3);
+    this.battle(att, def, offs.slice(0, 3), dOff, target, w, m.attackerIsA);
+    for (const o of offs) { const home = this.sett(att.capital); if (home) { o.x = home.x; o.y = home.y; } }
   }
 
   afterBattle(ctx, res) {
@@ -737,6 +762,8 @@ export class World {
     const imp = decisive || lines.length > 1 || ctx.big ? 2 : 1;
     this.log(imp, 'battle', `Battle of ${target.name} (${this.season.toLowerCase()}, ${target.biome}). ${att.name} attacks ${def.name}, ${troopWord}. ${wR.name}, led by ${lead ? this.fullName(lead) : 'its levies'}, ${decisive ? 'crushes' : 'defeats'} ${lR.name}.${lines.length ? ' ' + lines.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : ''}`, [...ctx.aOff, ...ctx.dOff].map(o => o.id));
     const last = this.chronicle[this.chronicle.length - 1]; last.battle = ctx.index; last.watched = !!ctx.watched;
+    (this.battleSites || (this.battleSites = [])).push({ x: target.x, y: target.y, at: this.year * 12 + this.month, winner: wR.id });
+    if (this.battleSites.length > 40) this.battleSites.shift();
     this.afterBattle(ctx, { attackerWon: wonSide === 0, decisive });
   }
 

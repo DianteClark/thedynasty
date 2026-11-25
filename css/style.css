@@ -130,3 +130,16 @@ body.in-battle header.top, body.in-battle .tabs, body.in-battle main { visibilit
 .bdivs.two { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .bdiv.mini { min-height: 0; padding: 6px 7px; }
 .bdiv.mini .bdname { font-size: 12px; }
+
+/* ---------- overworld map ---------- */
+body.map-mode main { padding: 0; }
+.wmap { position: fixed; left: 0; right: 0; background: #0d1820; touch-action: none; user-select: none; -webkit-user-select: none; z-index: 3; }
+.wmap .wm { position: absolute; inset: 0; image-rendering: pixelated; }
+.wmini { position: absolute; right: 8px; bottom: 8px; width: 126px; height: 84px; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; background: #0d1820; }
+.wzoom { position: absolute; right: 8px; top: 8px; }
+.wcard { position: absolute; left: 8px; right: 142px; bottom: 8px; background: rgba(22,18,13,.95); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; max-height: 60%; overflow-y: auto; }
+.wcard h3 { margin: 0 34px 2px 0; font-family: var(--serif); font-size: 17px; }
+.wcard .close { position: absolute; right: 8px; top: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; width: 30px; height: 30px; color: var(--ink); }
+.wcard .kv { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+@media (max-width: 420px) { .wcard { right: 8px; bottom: 100px; } }

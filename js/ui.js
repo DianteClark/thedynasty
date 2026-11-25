@@ -1,6 +1,7 @@
 import { World, SIZES, TROOP_TIERS } from './sim.js';
 import { cultureById } from './names.js';
 import { renderBattleSetup, handleBattleSetupClick, watchBattle } from './battleview.js';
+import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -20,6 +21,7 @@ function randomSeed() { const w = ['ember', 'raven', 'thorn', 'gold', 'ash', 'st
 async function newWorld(seed, size, months = 0, watched = []) {
   playing = false; setPlayBtn();
   world = new World(seed, size);
+  setWorld(world);
   // rebuild the saved world: battles you watched are re-fought exactly as you saw them
   world.replayWatched = new Set(watched); world.watchedList = [...watched];
   if (months > 0) await advance(months, true);
@@ -94,7 +96,7 @@ function render(soft = false) {
   updateHeader();
   if (soft && tab !== 'map' && tab !== 'chronicle') return;
   if (tab === 'chronicle') renderChronicle();
-  else if (tab === 'map') renderMap(soft);
+  else if (tab === 'map') { if (!soft) mountMap(view, world, { realm: realmSheet, char: charSheet }); else refreshCard(); }
   else if (tab === 'realms') renderRealms();
   else if (tab === 'people') renderPeople();
   else if (tab === 'stats') renderStats();
@@ -340,7 +342,7 @@ document.addEventListener('click', ev => {
   if (!t) return;
   if (tab === 'battle' && !t.dataset.tab && handleBattleSetupClick(t, view)) return;
   if (t.matches('[data-close]')) return closeSheet();
-  if (t.dataset.tab) { tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
+  if (t.dataset.tab) { if (tab === 'map' && t.dataset.tab !== 'map') unmountMap(); tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
   if (t.dataset.type) { ui.type = t.dataset.type; ui.shown = 60; return renderChronicle(); }
   if (t.id === 'moreBtn') { ui.shown += 80; return renderChronicle(); }
@@ -356,9 +358,9 @@ $('#btnYear').onclick = () => !busy && advance(12);
 $('#btnTen').onclick = () => !busy && advance(120);
 $('#btnHundred').onclick = () => !busy && advance(1200);
 $('#btnWorld').onclick = () => !busy && worldSheet();
-window.addEventListener('resize', () => { if (tab === 'map') drawMap(); });
 
 // ---------- start ----------
+window.dynasty = () => world; window.dynastyCam = debugCam; // handy for debugging from the console
 (async () => {
   const saved = load();
   if (saved && saved.watchMode) watchMode = saved.watchMode;

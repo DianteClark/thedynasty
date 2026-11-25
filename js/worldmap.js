@@ -1,0 +1,275 @@
+// The overworld: a living map drawn with HAS tiles. Pan, pinch-zoom, tap anything.
+import { BUILDINGS, MONSTER_ROWS, BIOMES } from '../assets/world/world.js';
+import { UNITS } from './battle.js';
+import { cultureById } from './names.js';
+import { MON } from './sim.js';
+
+const T = 16; // pixels per world cell
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const img = {}; let ready = null;
+function load(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function loadArt() {
+  if (ready) return ready;
+  ready = Promise.all([
+    load('assets/world/terrain.png').then(i => img.terrain = i),
+    load('assets/world/buildings.png').then(i => img.buildings = i),
+    load('assets/world/monsters.png').then(i => img.monsters = i),
+    ...Object.keys(UNITS).map(f => load(`assets/units/${f}.png`).then(i => img['u_' + f] = i)),
+  ]);
+  return ready;
+}
+
+let W = null, root = null, canvas, g, mini, mg, terrainLayer = null, terrainKey = '', ownerKey = '', ownerLayer = null;
+let cam = { x: 0, y: 0, z: 1 }, raf = 0, sel = null, cb = {}, dpr = 1;
+
+export async function mountMap(container, world, callbacks) {
+  W = world; cb = callbacks;
+  container.innerHTML = '<div class="empty">Unrolling the map…</div>';
+  await loadArt();
+  root = document.createElement('div'); root.className = 'wmap';
+  root.innerHTML = `<canvas class="wm"></canvas><canvas class="wmini" width="168" height="112"></canvas>
+    <button class="bbtn wzoom" data-w="fit" aria-label="Show whole map">⤢</button><div class="wcard" id="wcard" hidden></div>`;
+  container.innerHTML = ''; container.appendChild(root);
+  document.body.classList.add('map-mode');
+  canvas = root.querySelector('.wm'); g = canvas.getContext('2d'); mini = root.querySelector('.wmini'); mg = mini.getContext('2d');
+  fit(); window.addEventListener('resize', fit);
+  if (!cam.init || cam.world !== W) { const cap = biggestCapital(); cam = { x: cap ? cap.x * T : W.w * T / 2, y: cap ? cap.y * T : W.h * T / 2, z: 1.6, init: true, world: W }; }
+  bind();
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
+}
+export function unmountMap() { cancelAnimationFrame(raf); window.removeEventListener('resize', fit); document.body.classList.remove('map-mode'); root = null; }
+export function setWorld(world) { W = world; if (cam.world !== world) cam.init = false; }
+
+function biggestCapital() { const r = W.realmList().sort((a, b) => W.realmSetts(b).length - W.realmSetts(a).length)[0]; return r && W.sett(r.capital); }
+function fit() {
+  if (!root) return;
+  const top = document.querySelector('header.top').getBoundingClientRect().bottom;
+  const bottom = document.querySelector('#tabs').getBoundingClientRect().height;
+  root.style.top = top + 'px'; root.style.bottom = bottom + 'px';
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  const r = root.getBoundingClientRect();
+  canvas.width = r.width * dpr; canvas.height = r.height * dpr; canvas.style.width = r.width + 'px'; canvas.style.height = r.height + 'px';
+  root._w = r.width; root._h = r.height;
+}
+
+// ---------- layers ----------
+function hash(x, y, k = 0) { let h = (x * 374761393 + y * 668265263 + k * 1442695041) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function buildTerrain() {
+  const key = W.seed + W.size; if (terrainKey === key) return; terrainKey = key;
+  const c = document.createElement('canvas'); c.width = W.w * T; c.height = W.h * T; const t = c.getContext('2d'); t.imageSmoothingEnabled = false;
+  const bi = b => Math.max(0, BIOMES.indexOf(b));
+  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
+    const b = W.grid[y][x];
+    if (b === 'water') { t.drawImage(img.terrain, 288, 0, 16, 16, x * T, y * T, T, T); continue; }
+    const v = hash(x, y) < 0.7 ? 0 : hash(x, y, 1) < 0.5 ? 1 : 2;
+    t.drawImage(img.terrain, bi(b) * 48 + v * 16, 0, 16, 16, x * T, y * T, T, T);
+  }
+  // shore shading
+  t.fillStyle = 'rgba(0,0,0,.18)';
+  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) if (W.grid[y][x] === 'water' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => W.grid[y + dy]?.[x + dx] && W.grid[y + dy][x + dx] !== 'water')) t.fillRect(x * T, y * T, T, T);
+  // objects sorted top to bottom so they overlap naturally
+  const objs = [];
+  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
+    const b = W.grid[y][x]; if (b === 'water') continue;
+    if (W.setts.some(s => Math.abs(s.x - x) <= 1 && Math.abs(s.y - y) <= 1)) continue;
+    if (b === 'mountain') objs.push({ y: y * T + 14, draw: () => t.drawImage(img.terrain, bi(b) * 32, 40, 32, 32, x * T - 8 + hash(x, y, 2) * 4, y * T - 14, 32, 32) });
+    const density = b === 'forest' ? 2 : b === 'swamp' ? 0.6 : b === 'tundra' ? 0.45 : b === 'plains' ? 0.12 : b === 'wasteland' ? 0.1 : 0;
+    for (let k = 0; k < 2; k++) if (hash(x, y, 3 + k) < density / 2) {
+      const ox = hash(x, y, 5 + k) * 10 - 5, oy = hash(x, y, 7 + k) * 8 - 4, v = hash(x, y, 9 + k) < 0.5 ? 0 : 1;
+      objs.push({ y: y * T + oy + 12, draw: () => t.drawImage(img.terrain, bi(b) * 48 + v * 24, 16, 24, 24, x * T - 4 + ox, y * T - 10 + oy, 24, 24) });
+    }
+  }
+  objs.sort((a, b) => a.y - b.y).forEach(o => o.draw());
+  terrainLayer = c;
+}
+function buildOwners() {
+  const live = W.setts.filter(s => !s.destroyed && s.realmId && W.realm(s.realmId)?.alive);
+  const key = live.map(s => s.id + ':' + s.realmId).join(',');
+  if (key === ownerKey && ownerLayer) return; ownerKey = key;
+  const own = Array.from({ length: W.h }, () => new Array(W.w).fill(null));
+  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
+    if (W.grid[y][x] === 'water') continue;
+    let best = null, bd = 14;
+    for (const s of live) { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s; } }
+    if (best) own[y][x] = best.realmId;
+  }
+  const c = document.createElement('canvas'); c.width = W.w * T; c.height = W.h * T; const o = c.getContext('2d');
+  for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
+    const id = own[y][x]; if (!id) continue; const col = W.realm(id).color;
+    o.globalAlpha = 0.2; o.fillStyle = col; o.fillRect(x * T, y * T, T, T); o.globalAlpha = 0.95;
+    if (own[y][x + 1] !== id) o.fillRect(x * T + T - 2, y * T, 2, T);
+    if (own[y][x - 1] !== id) o.fillRect(x * T, y * T, 2, T);
+    if (own[y + 1]?.[x] !== id) o.fillRect(x * T, y * T + T - 2, T, 2);
+    if (own[y - 1]?.[x] !== id) o.fillRect(x * T, y * T, T, 2);
+  }
+  ownerLayer = c; W._own = own;
+}
+
+// ---------- sprites ----------
+function settSprite(s) {
+  if (s.destroyed) return 'ruins';
+  const r = W.realm(s.realmId); const cul = s.culture;
+  if (r && r.capital === s.id && r.tier === 'Kingdom') return 'cap_' + cul;
+  if (r && r.capital === s.id && r.tier === 'Lordship') return 'town_' + cul;
+  if (s.pop > 1100) return 'town_' + cul;
+  const special = { dwarf: ['vil_dwarf'], woodelf: ['vil_woodelf'], orc: ['vil_orc', 'vil_orc2'], lizard: ['vil_lizard', 'vil_lizard2'], undying: ['graveyard', 'vil_seer'] }[cul];
+  const list = special || (s.biome === 'swamp' ? ['vil_water'] : s.biome === 'forest' ? ['vil_saw', 'vil_seer'] : ['vil_mill', 'vil_trade', 'vil_water']);
+  return list[s.id % list.length];
+}
+function drawBuilding(name, cx, by, h) {
+  const b = BUILDINGS[name]; if (!b) return;
+  const k = h / Math.max(b[2], b[3]); const w = b[2] * k, hh = b[3] * k;
+  g.drawImage(img.buildings, b[0], b[1], b[2], b[3], cx - w / 2, by - hh, w, hh);
+}
+function drawUnitSprite(f, u, x, y, flip, t, scale = 1) {
+  const im = img['u_' + f]; if (!im) return;
+  const fr = Math.floor(t * 5) % 4 + 4; // walk cycle
+  g.save(); g.translate(x, y); if (flip) g.scale(-1, 1);
+  g.drawImage(im, fr * 16, u * 16, 16, 16, -8 * scale, -15 * scale, 16 * scale, 16 * scale); g.restore();
+}
+
+// ---------- frame ----------
+function frame(now) {
+  if (!root) return;
+  draw(now / 1000); drawMini();
+  raf = requestAnimationFrame(frame);
+}
+function clamp() {
+  const vw = root._w / cam.z, vh = root._h / cam.z, MW = W.w * T, MH = W.h * T;
+  cam.x = vw >= MW ? MW / 2 : Math.max(vw / 2, Math.min(MW - vw / 2, cam.x));
+  cam.y = vh >= MH ? MH / 2 : Math.max(vh / 2, Math.min(MH - vh / 2, cam.y));
+}
+function draw(t) {
+  buildTerrain(); buildOwners(); clamp();
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.imageSmoothingEnabled = false;
+  g.fillStyle = '#0d1820'; g.fillRect(0, 0, root._w, root._h);
+  g.setTransform(cam.z * dpr, 0, 0, cam.z * dpr, (root._w / 2 - cam.x * cam.z) * dpr, (root._h / 2 - cam.y * cam.z) * dpr);
+  g.drawImage(terrainLayer, 0, 0); g.drawImage(ownerLayer, 0, 0);
+  const now = W.year * 12 + W.month;
+  // monster lairs
+  for (const L of W.lairs) {
+    if (!L.alive || L.strength < 15) continue;
+    const row = MONSTER_ROWS.indexOf(L.key); if (row < 0) continue;
+    const s = L.key === 'dragon' ? 1.6 : 1 + Math.min(0.5, L.strength / 120);
+    if (L.strength > 50) { g.fillStyle = `rgba(255,60,40,${0.18 + 0.12 * Math.sin(t * 4)})`; g.beginPath(); g.arc(L.x * T + 8, L.y * T + 6, 13 * s, 0, 7); g.fill(); }
+    g.drawImage(img.monsters, (Math.floor(t * 4 + L.id) % 4) * 24, row * 24, 24, 24, L.x * T + 8 - 12 * s, L.y * T + 12 - 24 * s, 24 * s, 24 * s);
+  }
+  // settlements, drawn top to bottom
+  const setts = [...W.setts].sort((a, b) => a.y - b.y);
+  for (const s of setts) {
+    const name = settSprite(s); const r = W.realm(s.realmId);
+    const h = name.startsWith('cap_') ? 44 : name.startsWith('town_') ? 32 : name === 'ruins' ? 20 : 22;
+    drawBuilding(name, s.x * T + 8, s.y * T + 14, h);
+    if (s.famine && !s.destroyed) { g.fillStyle = '#ffcf70'; g.font = '9px sans-serif'; g.textAlign = 'center'; g.fillText('🌾', s.x * T + 16, s.y * T - 10); }
+    if (s.id === sel?.id && sel.kind === 'sett') { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.strokeRect(s.x * T - 12, s.y * T - 20, 40, 38); }
+  }
+  // recent battles
+  g.textAlign = 'center'; g.font = '14px sans-serif';
+  for (const b of W.battleSites || []) if (now - b.at < 4) { g.globalAlpha = 1 - (now - b.at) / 5; g.fillText('⚔️', b.x * T + 8, b.y * T - 18); g.globalAlpha = 1; }
+  // marching hosts
+  for (const w of W.wars) {
+    const m = w.march; if (!m) continue;
+    const att = W.realm(m.att), tgt = W.sett(m.target); if (!att || !tgt) continue;
+    const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
+    const mx = m.x * T + 8, my = m.y * T + 10;
+    g.strokeStyle = att.color; g.lineWidth = 1.5 / cam.z; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(mx, my); g.lineTo(tgt.x * T + 8, tgt.y * T + 8); g.stroke(); g.setLineDash([]);
+    const flip = tgt.x < m.x;
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(mx, my + 1, 18, 5, 0, 0, 7); g.fill();
+    offs.slice(0, 3).forEach((o, i) => drawUnitSprite(o.army.faction, o.army.unit, mx + (i - 1) * 11, my + (i % 2) * 4, flip, t + i * 0.3, 1.3));
+    g.fillStyle = att.color; g.fillRect(mx - 1, my - 34, 2, 16); g.fillRect(mx + (flip ? -11 : 1), my - 34, 10, 7);
+    if (sel?.kind === 'march' && sel.war === w) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(mx, my - 6, 18, 0, 7); g.stroke(); }
+  }
+  // labels
+  g.textBaseline = 'bottom';
+  for (const r of W.realmList()) {
+    if (r.tier === 'Village' && cam.z < 2.2) continue;
+    const s = W.sett(r.capital); if (!s) continue;
+    const war = W.wars.some(w => !w.over && (w.a === r.id || w.b === r.id));
+    const label = (war ? '⚔ ' : '') + r.name;
+    const size = r.tier === 'Kingdom' ? 11 : 9;
+    g.font = `600 ${size}px Georgia, serif`;
+    const tw = g.measureText(label).width; const lx = s.x * T + 8, ly = s.y * T + 26;
+    g.fillStyle = 'rgba(16,12,8,.75)'; g.fillRect(lx - tw / 2 - 4, ly - size - 3, tw + 8, size + 5);
+    g.fillStyle = r.color; g.fillRect(lx - tw / 2 - 4, ly - size - 3, 2, size + 5);
+    g.fillStyle = war ? '#ffb4a6' : '#fff4dc'; g.fillText(label, lx, ly);
+  }
+  if (cam.z >= 2.2) {
+    g.font = '7px sans-serif'; g.fillStyle = '#fff4dc';
+    for (const s of W.setts) { const r = W.realm(s.realmId); if (r && r.capital === s.id) continue; g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 2; g.strokeText(s.name, s.x * T + 8, s.y * T + 24); g.fillText(s.name, s.x * T + 8, s.y * T + 24); }
+  }
+}
+function drawMini() {
+  const MW = mini.width, MH = mini.height, sx = MW / (W.w * T), sy = MH / (W.h * T);
+  if (!mini._bg || mini._key !== terrainKey + ownerKey) {
+    mini._key = terrainKey + ownerKey;
+    const c = document.createElement('canvas'); c.width = MW; c.height = MH; const m = c.getContext('2d');
+    m.drawImage(terrainLayer, 0, 0, MW, MH); m.globalAlpha = 0.9; m.drawImage(ownerLayer, 0, 0, MW, MH); mini._bg = c;
+  }
+  mg.drawImage(mini._bg, 0, 0);
+  for (const w of W.wars) if (w.march) { mg.fillStyle = W.realm(w.march.att)?.color || '#fff'; mg.fillRect(w.march.x * T * sx - 2, w.march.y * T * sy - 2, 4, 4); }
+  const vw = root._w / cam.z, vh = root._h / cam.z;
+  mg.strokeStyle = '#ffd76a'; mg.lineWidth = 1.5; mg.strokeRect((cam.x - vw / 2) * sx, (cam.y - vh / 2) * sy, vw * sx, vh * sy);
+}
+
+// ---------- input ----------
+function bind() {
+  const pts = new Map(); let pinch = null, start = null, moved = false;
+  canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); start = { x: e.clientX, y: e.clientY }; moved = false;
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: cam.z }; } });
+  canvas.addEventListener('pointermove', e => {
+    const p = pts.get(e.pointerId); if (!p) return;
+    if (pts.size === 2 && pinch) { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, b] = [...pts.values()]; cam.z = Math.max(0.3, Math.min(5, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)); moved = true; return; }
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) moved = true;
+    if (moved) { cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  const up = e => { const wasPinch = pts.size > 1; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!moved && !wasPinch && e.type === 'pointerup') tap(e); };
+  canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('wheel', e => { e.preventDefault(); cam.z = Math.max(0.3, Math.min(5, cam.z * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
+  mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * W.w * T; cam.y = (e.clientY - r.top) / r.height * W.h * T; });
+  root.querySelector('[data-w=fit]').onclick = () => { const fitZ = Math.min(root._w / (W.w * T), root._h / (W.h * T)); if (cam.z > fitZ * 1.2) { cam.z = fitZ; cam.x = W.w * T / 2; cam.y = W.h * T / 2; } else { cam.z = 1.6; } };
+  root.querySelector('#wcard').addEventListener('click', e => {
+    const t = e.target.closest('[data-wr],[data-wc],[data-wclose]'); if (!t) return;
+    if (t.dataset.wclose != null) { sel = null; card(); return; }
+    if (t.dataset.wr) cb.realm(+t.dataset.wr);
+    if (t.dataset.wc) cb.char(+t.dataset.wc);
+  });
+}
+function tap(e) {
+  const r = canvas.getBoundingClientRect();
+  const wx = (e.clientX - r.left - root._w / 2) / cam.z + cam.x, wy = (e.clientY - r.top - root._h / 2) / cam.z + cam.y;
+  const reach = Math.max(14, 26 / cam.z);
+  let best = null, bd = reach * reach;
+  const consider = (kind, x, y, obj) => { const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
+  for (const w of W.wars) if (w.march) consider('march', w.march.x * T + 8, w.march.y * T + 2, { war: w });
+  for (const L of W.lairs) if (L.alive && L.strength >= 15) consider('lair', L.x * T + 8, L.y * T, { lair: L });
+  for (const s of W.setts) consider('sett', s.x * T + 8, s.y * T + 4, { id: s.id });
+  sel = best; card();
+}
+function card() {
+  const box = root.querySelector('#wcard');
+  if (!sel) { box.hidden = true; return; }
+  box.hidden = false;
+  const close = '<button class="close" data-wclose aria-label="Close">✕</button>';
+  if (sel.kind === 'sett') {
+    const s = W.sett(sel.id); const r = W.realm(s.realmId); const ruler = r && W.char(r.rulerId);
+    box.innerHTML = `${close}<h3>${esc(s.name)}${s.destroyed ? ' (ruins)' : ''}</h3>
+      <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
+      ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
+      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span></div>`}`;
+  } else if (sel.kind === 'march') {
+    const m = sel.war.march; if (!m) { sel = null; return card(); }
+    const att = W.realm(m.att), def = W.realm(m.def), tgt = W.sett(m.target);
+    const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
+    const total = offs.reduce((a, o) => a + o.army.size, 0);
+    const months = Math.ceil(Math.hypot(tgt.x - m.x, tgt.y - m.y) / (W.season === 'Winter' ? 1.6 : 3.2));
+    box.innerHTML = `${close}<h3>⚔ Host of ${esc(att.name)}</h3><div class="sub">${total.toLocaleString()} troops marching on ${esc(tgt.name)} (${esc(def.name)}) · about ${months} month${months === 1 ? '' : 's'} away</div>
+      <div class="wrow">${offs.map(o => `<button class="pill" data-wc="${o.id}">${esc(o.name)} · ${o.army.size} ${esc(W.plural(W.unitName(o.army)))}</button>`).join('')}</div>`;
+  } else if (sel.kind === 'lair') {
+    const L = sel.lair; const danger = L.strength > 50 ? 'Ready to break out' : L.strength > 30 ? 'Growing restless' : 'Stirring';
+    const nm = MON[L.key] ? MON[L.key].the : L.key;
+    box.innerHTML = `${close}<h3>Lair of ${esc(nm)}</h3><div class="sub">${danger} · strength ${Math.round(L.strength * L.base)}</div><div class="sub" style="margin-top:6px">Left alone, monsters grow until they break out and ravage nearby settlements. Heroes may slay, trap or tame them.</div>`;
+  }
+}
+export function debugCam() { return cam; }
+export function refreshCard() { if (root && sel) card(); }

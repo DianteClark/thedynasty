@@ -58,3 +58,17 @@ Sprite atlases are built from the original HAS frames by `tools/build_assets.py`
 - Generals fight in character: reckless, cautious or balanced, from their traits
 - Watch battles as they happen (⚙ → never, big battles, every battle); the world pauses and the battle map opens. Skipped battles use the same engine with each soldier standing in for a company
 - Saves stay exact: battles you watched are re-fought step for step when your world is rebuilt
+
+## Prototype 0.4: the overworld
+
+The **Map** tab is now a living world map drawn with HAS art:
+
+- Terrain from the HAS Overworld tiles: grassland, forest, swamp, wasteland, tundra and mountains, with trees and peaks laid out per land type
+- Settlements drawn by culture and size: castles for kingdom capitals (Castle, Rampart, Necropolis, Inferno, Stronghold, Tower, Dwarven, Wood Elf, Orc and Lizardmen), towns for lordship seats and big towns, and windmills, watermills, sawmills, huts and graveyards for villages; ruins where a settlement was destroyed
+- Realm borders and tints, capital name plates (⚔ when at war), and settlement names when zoomed in
+- Monster lairs shown with the monster's own sprite, glowing red when ready to break out
+- Armies march: a war host gathers at the nearest friendly holding and marches on its target (slower in winter, swamps, forests and mountains); the battle happens when it arrives. Hosts show their actual troops walking under the realm's banner
+- Recent battle sites and famines are marked
+- Pan, pinch to zoom, ⤢ for the whole map, a minimap you can tap to jump, and tap any settlement, host or lair for details
+
+Overworld art is built by `tools/build_world_assets.py`.
