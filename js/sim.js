@@ -347,8 +347,9 @@ export class World {
         s.pop = Math.max(20, Math.round(s.pop * 0.985)); s.unrest += 2; s.food = Math.max(s.food, -s.pop * 0.1);
       } else if (s.famine && s.food > s.pop * 0.05) { s.famine = false; s.aided = false; }
       else if (s.food > 0) s.pop = Math.round(s.pop * (1 + 0.0015 * (s.biome === 'plains' ? 1.3 : 1)));
-      if (r) r.treasury += s.pop * 0.004 * (1 + (this.char(r.rulerId)?.stats.pol || 5) / 20) * (r.tax === 'low' ? 0.6 : r.tax === 'high' ? 1.5 : 1) - GUARD[s.guard].cost * 0.2;
+      if (r) r.treasury += s.pop * 0.004 * (1 + ((this.steward(r) || this.char(r.rulerId))?.stats.pol || 5) / 20) * (r.tax === 'low' ? 0.6 : r.tax === 'high' ? 1.5 : 1) - GUARD[s.guard].cost * 0.2;
     }
+    if (this.month % 2 === 1) for (const r of this.realmList()) this.stewardWork(r);
     // Food aid to starving neighbours
     if (this.month % 2 === 0) {
       for (const s of this.setts.filter(s => s.famine && !s.destroyed)) {
@@ -907,11 +908,11 @@ export class World {
   }
 
   // ---------- intrigue: spies, assassins, rumors ----------
-  spymaster(r) { const offs = this.living().filter(c => c.realmId === r.id && (c.role === 'officer' || c.role === 'ruler' || c.role === 'courtier') && this.age(c) >= 16); return offs.sort((a, b) => b.stats.int - a.stats.int)[0]; }
+  spymaster(r) { const sm = this.council(r, 'spymasterId'); if (sm) return sm; const offs = this.living().filter(c => c.realmId === r.id && (c.role === 'officer' || c.role === 'ruler' || c.role === 'courtier') && this.age(c) >= 16); return offs.sort((a, b) => b.stats.int - a.stats.int)[0]; }
   guardSetting(r) {
     // rulers who feel threatened tighten security
     const ruler = this.char(r.rulerId);
-    if (this.isPlayer(ruler)) { const g = r.guardChoice || 'Light'; const cap = this.sett(r.capital); if (cap) cap.guard = g; return g; }
+    if (this.isPlayer(ruler) && !(r.guardAuto && this.captain(r))) { const g = r.guardChoice || 'Light'; const cap = this.sett(r.capital); if (cap) cap.guard = g; return g; }
     const threats = this.wars.filter(w => !w.over && (w.a === r.id || w.b === r.id)).length + (ruler && ruler.plotted ? 1 : 0);
     const g = threats >= 2 || (ruler && this.has(ruler, 'cautious') && threats) ? 'Locked Down' : threats ? 'Watchful' : 'Light';
     const cap = this.sett(r.capital); if (cap) cap.guard = g;
@@ -1104,6 +1105,12 @@ export class World {
     for (const r of this.realmList()) {
       const ruler = this.char(r.rulerId);
       if (!ruler || !ruler.alive) { this.succession(r, ruler); continue; }
+      this.appointCouncil(r);
+      if (!this.isPlayer(ruler) && r.treasury > 250) {
+        // AI rulers turn surplus gold into soldiers
+        const offs = this.realmOfficers(r); const spend = Math.min((r.treasury - 250) * 0.6, this.levyCap(r) / 2);
+        if (offs.length && spend > 0) { r.treasury -= spend; const each = Math.round(spend * 2 / offs.length); for (const o of offs) o.army.size += each; }
+      }
       const need = r.tier === 'Village' ? 0 : Math.ceil(r.setts.size / 2) + 1;
       if (this.realmOfficers(r).length - 1 < need && this.chance(0.5)) {
         const v = this.living().find(c => c.role === 'vagabond' && this.age(c) >= 18 && this.realmSetts(r).some(s => this.dist(s, c) < 6));
@@ -1438,8 +1445,9 @@ export class World {
       if (!p.alive || !plotter || !plotter.alive) continue;
       if (plot.settId && p.settId !== plot.settId && p.role === 'vagabond') { this.you(`An assassin sent after you loses your trail.`, [], 2); continue; }
       const r = this.playerRealm();
-      const guard = r && this.playerRules() ? (r.guardChoice || 'Light') : 'Light';
-      let catchP = GUARD[guard].catch + (plot.warned ? 0.15 : 0) + (r ? (this.spymaster(r)?.stats.int || 0) * 0.01 : p.stats.int * 0.01) - plotter.stats.int * 0.01;
+      const guard = r && this.playerRules() ? this.guardSetting(r) : 'Light';
+      const cpt = r && this.captain(r);
+      let catchP = GUARD[guard].catch + (cpt ? cpt.stats.lea * 0.008 : 0) + (plot.warned ? 0.15 : 0) + (r ? (this.spymaster(r)?.stats.int || 0) * 0.01 : p.stats.int * 0.01) - plotter.stats.int * 0.01;
       if (p.role === 'vagabond') catchP += (this.living().filter(x => x.companionOf === p.id).length) * 0.08;
       if (this.chance(Math.max(0.12, Math.min(0.9, catchP)))) {
         this.stats.foiled++; this.opine(p, plotter, -70);
@@ -1673,6 +1681,120 @@ export class World {
     const r = this.playerRealm(); if (r.treasury < 80) return 'A tournament costs 80 gold.';
     if (this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id))) return 'Not while at war.';
     r.hostTournament = true; return 'Heralds ride out: a tournament will be held this summer.';
+  }
+
+  // ---------- 0.6 ruling: the council, granaries, armies and diplomacy ----------
+  council(r, role) { const id = r[role]; const c = id && this.char(id); return c && c.alive && c.realmId === r.id && !c.prisonerOf ? c : null; }
+  steward(r) { return this.council(r, 'stewardId'); }
+  captain(r) { return this.council(r, 'captainId'); }
+  appointCouncil(r) {
+    // AI realms fill empty seats with whoever suits them best; the player appoints their own
+    if (r.tier === 'Village' || this.isPlayer(this.char(r.rulerId))) return;
+    const pool = this.living().filter(c => c.realmId === r.id && (c.role === 'officer' || c.role === 'courtier') && this.age(c) >= 18 && !c.prisonerOf);
+    const seat = (role, stat, title) => {
+      if (this.council(r, role)) return;
+      const taken = ['stewardId', 'captainId', 'spymasterId'].map(k => r[k]);
+      const best = pool.filter(c => !taken.includes(c.id)).sort((a, b) => b.stats[stat] - a.stats[stat])[0];
+      if (best) { r[role] = best.id; if (!best.titles.rank) best.titles.rank = title; }
+    };
+    seat('stewardId', 'pol', 'Steward'); seat('spymasterId', 'int', 'Spymaster'); seat('captainId', 'lea', 'Captain of the Guard');
+  }
+  act_appoint(a) {
+    const r = this.playerRealm(), c = this.char(a.id); if (!r || !c || c.realmId !== r.id) return 'They do not serve you.';
+    const title = { stewardId: 'Steward', captainId: 'Captain of the Guard', spymasterId: 'Spymaster' }[a.role]; if (!title) return;
+    const old = this.council(r, a.role); if (old && old.titles.rank === title) old.titles.rank = null;
+    for (const k of ['stewardId', 'captainId', 'spymasterId']) if (r[k] === c.id) r[k] = null;
+    r[a.role] = c.id; c.titles.rank = title; c.loyalty = Math.min(100, (c.loyalty || 60) + 10); this.opine(c, this.player, 10);
+    this.you(`You name ${this.fullName(c)} your ${title}.`, [c.id], 1); return `${c.name} is your ${title}.`;
+  }
+  act_guardAuto(a) { const r = this.playerRealm(); r.guardAuto = !!a.on; return a.on ? 'Your captain will set the guard as threats rise and fall.' : 'You will set the guard yourself.'; }
+  stewardWork(r) {
+    // a steward sends grain to the realm's own starving holdings
+    const st = this.steward(r); if (!st) return;
+    for (const s of this.realmSetts(r)) if (s.famine && r.treasury > 40 && (!this.isPlayer(this.char(r.rulerId)) || r.stewardGrain !== false)) {
+      r.treasury -= 30; s.food += s.pop * 0.1; s.famine = false; s.unrest = Math.max(0, s.unrest - 10);
+      this.log(1, 'aid', `${this.fullName(st)}, steward of ${r.name}, sends grain to ${s.name}.`, [st.id]);
+    }
+  }
+  grainCost(s) { const r = this.playerRealm(); const cap = r && this.sett(r.capital); return Math.round(25 + (cap ? this.dist(cap, s) * 2 : 10)); }
+  act_grain(a) {
+    const r = this.playerRealm(), s = this.sett(a.sett), p = this.player; if (!r || !s || s.destroyed) return 'That place is gone.';
+    const cost = this.grainCost(s); if (r.treasury < cost) return `Grain for ${s.name} costs ${cost} gold.`;
+    r.treasury -= cost; s.food += s.pop * 0.15; s.famine = false; s.unrest = Math.max(0, s.unrest - 15); s.aided = true;
+    if (s.realmId === r.id) { this.you(`You send grain to ${s.name}.`, [], 1); return `Grain reaches ${s.name}.`; }
+    p.aid++; p.fame += 3; r.aidGiven = (r.aidGiven || 0) + 1; this.spreadRumor(p, 'merciful', 1);
+    const owner = this.realm(s.realmId);
+    if (owner && owner.setts.size === 1 && !this.isPlayer(this.char(owner.rulerId)) && this.chance(0.5)) {
+      const old = this.char(owner.rulerId); this.annexVillage(owner, r);
+      this.you(`You send grain to starving ${s.name}. Grateful, the village pledges itself to you.`, [old?.id].filter(Boolean), 2); return `${s.name} joins your realm.`;
+    }
+    if (owner) { const or = this.char(owner.rulerId); if (or) this.opine(or, p, 15); }
+    this.you(`You send grain to starving ${s.name}. Songs of your mercy spread.`, [], 2); return `Grain reaches ${s.name}.`;
+  }
+  levyCap(r) { return Math.round(this.realmPop(r) * 0.06); }
+  act_levy(a) {
+    const r = this.playerRealm(), o = this.char(a.id); if (!o || !o.army || o.realmId !== r.id) return 'They command no army.';
+    const n = Math.min(a.n || 50, Math.max(0, this.levyCap(r) - (r.leviedYear === this.year ? r.levied || 0 : 0)));
+    if (n <= 0) return 'Your people have given all the levies they can this year.';
+    const cost = Math.ceil(n / 2); if (r.treasury < cost) return `Raising ${n} troops costs ${cost} gold.`;
+    if (r.leviedYear !== this.year) { r.leviedYear = this.year; r.levied = 0; }
+    r.levied += n; r.treasury -= cost;
+    // fresh recruits dilute experience a little
+    const a0 = o.army; a0.xp = Math.round(a0.xp * a0.size / (a0.size + n)); a0.size += n;
+    for (const s of this.realmSetts(r)) s.pop = Math.max(30, s.pop - Math.round(n / r.setts.size));
+    return `${n} new ${this.plural(this.unitName(a0))} join ${o.name}'s army.`;
+  }
+  act_transfer(a) {
+    const r = this.playerRealm(), from = this.char(a.from), to = this.char(a.to);
+    if (!from || !to || from.realmId !== r.id || to.realmId !== r.id || !from.army) return 'That cannot be done.';
+    [from.army, to.army] = [to.army, from.army];
+    if (!from.army) from.army = { size: 0, level: 1, xp: 0, wins: 0, losses: 0, faction: from.culture, unit: this.pickUnit(from, from.culture) };
+    this.opine(from, this.player, -8); this.opine(to, this.player, 6);
+    this.you(`You give ${this.fullName(to)} command of ${this.plural(this.unitName(to.army))} that ${from.name} led.`, [to.id, from.id], 1);
+    return `${to.name} now commands that army.`;
+  }
+  royalMatches(child) {
+    return this.realmList().filter(r => r.id !== this.player.realmId).flatMap(r => { const ru = this.char(r.rulerId); return ru ? ru.children.map(id => this.char(id)).filter(k => k && k.alive && !k.spouseId && !k.betrothed && k.female !== child.female && Math.abs(this.age(k) - this.age(child)) < 8).map(k => ({ k, r })) : []; })
+      .sort((a, b) => this.realmSetts(b.r).length - this.realmSetts(a.r).length).slice(0, 6);
+  }
+  act_arrange(a) {
+    const p = this.player, r = this.playerRealm(), child = this.char(a.child), match = this.char(a.match);
+    if (!child || !match || !child.alive || !match.alive || child.spouseId || match.spouseId || child.betrothed || match.betrothed) return 'That match is no longer possible.';
+    const their = this.realmList().find(x => this.char(x.rulerId)?.children.includes(match.id));
+    const theirRuler = their && this.char(their.rulerId);
+    const ratio = this.realmStrength(r) / Math.max(1, this.realmStrength(their));
+    const accept = 0.35 + Math.min(0.35, (ratio - 1) * 0.25) + p.stats.cha * 0.015 + (theirRuler ? this.op(theirRuler, p) * 0.006 : 0) - (this.atWar(r, their) ? 0.5 : 0);
+    if (!this.chance(Math.max(0.05, Math.min(0.95, accept)))) { if (theirRuler) this.opine(theirRuler, p, -4); return `${their.name} declines the match.`; }
+    if (this.age(child) >= 16 && this.age(match) >= 16) { this.marry(child, match, false); }
+    else { child.betrothed = match.id; match.betrothed = child.id; this.you(`${child.name} is betrothed to ${this.fullName(match)} of ${their.name}. They will wed when both come of age.`, [child.id, match.id], 2); }
+    if (theirRuler) this.opine(theirRuler, p, 15);
+    this.recomputeAlliances(); return 'The houses are joined.';
+  }
+  act_ward(a) {
+    const p = this.player, r = this.playerRealm(), child = this.char(a.child), host = this.realm(a.realm);
+    if (!child || !host || !host.alive || child.wardOf || this.age(child) >= 16) return 'That cannot be done.';
+    if (this.atWar(r, host)) return 'Not to a realm you are at war with.';
+    child.wardOf = host.id; r.truce.set(host.id, this.year + 10); host.truce.set(r.id, this.year + 10);
+    const hr = this.char(host.rulerId); if (hr) { this.opine(hr, p, 25); this.opine(child, hr, 20); }
+    this.you(`You send ${child.name} to be raised at the court of ${host.name}. Neither realm will attack the other for ten years, but the child will grow up with loyalties to both.`, [child.id, hr?.id].filter(Boolean), 2);
+    return `${child.name} rides for ${host.name}.`;
+  }
+  act_peaceTerms(a) {
+    const r = this.playerRealm(); const w = this.wars.find(x => !x.over && (x.a === r.id || x.b === r.id) && (x.a === a.realm || x.b === a.realm));
+    if (!w) return 'You are not at war with them.';
+    const their = this.realm(a.realm); const tr = this.char(their.rulerId); const p = this.player;
+    const mineScore = w.a === r.id ? w.score : -w.score;
+    let chance = 0.25 + (mineScore >= 0 ? 0.25 : -0.1 * Math.min(3, -mineScore)) + (tr && this.has(tr, 'content') ? 0.2 : 0) - (tr && this.has(tr, 'ambitious') ? 0.15 : 0) + w.months * 0.01;
+    let cost = '';
+    if (a.terms === 'gold') { if (r.treasury < 100) return 'You cannot pay 100 gold.'; chance += 0.35; }
+    if (a.terms === 'cede') { const h = this.realmSetts(r).filter(s => s.id !== r.capital).sort((x, y) => Math.min(...this.realmSetts(their).map(t => this.dist(t, x))) - Math.min(...this.realmSetts(their).map(t => this.dist(t, y))))[0]; if (!h) return 'You have no holding to give but your seat.'; a.cede = h.id; chance += 0.6; }
+    if (a.terms === 'ward') { const kid = p.children.map(id => this.char(id)).find(k => k && k.alive && this.age(k) < 16 && !k.wardOf); if (!kid) return 'You have no young child to send.'; a.kid = kid.id; chance += 0.3; }
+    if (!this.chance(Math.max(0.05, Math.min(0.95, chance)))) return `${their.name} rejects your terms. The war goes on.`;
+    if (a.terms === 'gold') { r.treasury -= 100; their.treasury += 100; cost = ' You pay 100 gold.'; }
+    if (a.terms === 'cede') { const h = this.sett(a.cede); this.joinRealm(h, their); cost = ` You cede ${h.name}.`; }
+    if (a.terms === 'ward') { const kid = this.char(a.kid); kid.wardOf = their.id; if (tr) this.opine(kid, tr, 20); cost = ` ${kid.name} goes to ${their.name} as a ward.`; }
+    this.makePeace(w, this.realm(w.a), this.realm(w.b));
+    this.you(`Peace with ${their.name}.${cost}`, [tr?.id].filter(Boolean), 2); return `Peace with ${their.name}.`;
   }
 
   // ---------- views ----------

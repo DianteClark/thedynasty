@@ -90,3 +90,12 @@ You live in the world now. The **You** tab is where your story happens.
 - **Saves are exact:** your world is rebuilt from its seed, your actions and your battle orders.
 
 The battle sandbox has moved to the Stats tab.
+
+## 0.6: ruling
+
+- **Your council:** appoint a Steward (Politics: more income, sends grain to your own starving holdings), a Spymaster (Intellect: uncovers plots, runs spies) and a Captain of the Guard (Leadership: catches assassins, and can set the guard for you as threats change). AI realms fill their councils too.
+- **Granaries:** see every holding's food; send grain to famine-struck places within reach. Feeding your own calms them; feeding others wins hearts, and free villages may join you.
+- **Armies:** raise levies (2 troops per gold, limited by your population each year) and swap armies between officers so your best troops serve your best commander.
+- **Your children:** arrange matches with ruling houses (alliances while the couple lives; betrothals for the young), or send a child as a ward for ten years of peace.
+- **Peace terms:** offer peace, pay 100 gold, cede a holding, or send a child as a ward.
+- AI rulers now spend surplus gold on troops.

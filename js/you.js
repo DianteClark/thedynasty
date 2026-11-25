@@ -134,8 +134,10 @@ function actions(w, p, r, rules) {
       <div class="chips">${['Light', 'Watchful', 'Locked Down'].map(l => `<button class="chip ${(r.guardChoice || 'Light') === l ? 'on' : ''}" data-act='${JSON.stringify({ type: 'guard', level: l })}'>${l}</button>`).join('')}</div>
       ${hire.length ? `<div class="sub" style="margin-top:6px">Wanderers who would serve you (40 gold):</div><div class="abtns">${hire.map(v => btn(`${esc(v.name)} (Lead ${v.stats.lea}, Might ${v.stats.mig})`, { type: 'recruit', id: v.id })).join('')}</div>` : ''}
       ${r.tier !== 'Village' ? `<div class="arow"><div><b>Host a tournament</b><div class="sub">80 gold. Fame, marriage offers, and a crowd an assassin could hide in.</div></div>${btn('Host', { type: 'tournament' })}</div>` : ''}</div>`;
+    h += council(w, r) + granaries(w, r) + armies(w, r) + family(w, p, r);
     h += `<div class="card"><h3>⚔ War and peace</h3>
-      ${wars.map(x => { const o = w.realm(x.a === r.id ? x.b : x.a); return `<div class="arow"><div><b>At war with ${esc(o.name)}</b><div class="sub">${esc(x.reason)} · ${x.battles} battle(s)</div></div>${btn('Sue for peace', { type: 'peace', realm: o.id })}</div>`; }).join('')}
+      ${wars.map(x => { const o = w.realm(x.a === r.id ? x.b : x.a); const sc = x.a === r.id ? x.score : -x.score; return `<div class="arow"><div><b>At war with ${esc(o.name)}</b><div class="sub">${esc(x.reason)} · ${x.battles} battle(s) · ${sc > 0 ? 'you are winning' : sc < 0 ? 'you are losing' : 'evenly matched'}</div></div></div>
+        <div class="abtns">${btn('Offer peace', { type: 'peaceTerms', realm: o.id, terms: 'white' })}${btn('Pay 100 gold', { type: 'peaceTerms', realm: o.id, terms: 'gold' })}${btn('Cede a holding', { type: 'peaceTerms', realm: o.id, terms: 'cede' }, 'data-confirm="Give up a holding for peace?"')}${btn('Send a child as ward', { type: 'peaceTerms', realm: o.id, terms: 'ward' })}</div>`; }).join('')}
       ${neigh.length ? `<div class="sub">Declare war on a neighbour (strength: yours ${Math.round(w.realmStrength(r)).toLocaleString()}):</div><div class="abtns">${neigh.slice(0, 6).map(o => btn(`${esc(o.name)} (${Math.round(w.realmStrength(o)).toLocaleString()})${r.allies.has(o.id) ? ' · ally!' : ''}`, { type: 'war', realm: o.id }, `data-confirm="Declare war on ${esc(o.name)}?"`)).join('')}</div>` : '<div class="sub">No neighbours within reach.</div>'}
       ${villages.length ? `<div class="sub" style="margin-top:8px">Win over a free village (once a year; charisma, fame and past kindness help):</div><div class="abtns">${villages.slice(0, 5).map(o => btn(esc(o.name), { type: 'persuade', realm: o.id })).join('')}</div>` : ''}</div>`;
   }
@@ -157,4 +159,45 @@ function renderGameOver(view, w) {
     <button class="btn ghost" data-y="newworld">Start a new world</button>
     <h2 class="sec">The saga of your line</h2>
     ${saga.map(e => `<div class="entry i${e.importance}"><div class="meta">Year ${e.y}</div>${esc(e.text)}</div>`).join('')}`;
+}
+
+function council(w, r) {
+  if (r.tier === 'Village' && w.realmOfficers(r).length < 2) return '';
+  const pool = w.living().filter(c => c.realmId === r.id && c.id !== r.rulerId && (c.role === 'officer' || c.role === 'courtier') && w.age(c) >= 16);
+  const seat = (role, label, stat, does) => {
+    const cur = w.council(r, role);
+    return `<div class="arow" style="display:block"><div><b>${label}</b>: ${cur ? `<button class="pill" data-char="${cur.id}">${esc(cur.name)} (${stat} ${cur.stats[stat === 'Politics' ? 'pol' : stat === 'Intellect' ? 'int' : 'lea']})</button>` : '<span class="tag war">empty</span>'}<div class="sub">${does}</div></div>
+      <div class="chips">${pool.slice().sort((a, b) => b.stats[stat === 'Politics' ? 'pol' : stat === 'Intellect' ? 'int' : 'lea'] - a.stats[stat === 'Politics' ? 'pol' : stat === 'Intellect' ? 'int' : 'lea']).slice(0, 5).map(c => `<button class="chip ${cur && cur.id === c.id ? 'on' : ''}" data-act='${esc(JSON.stringify({ type: 'appoint', role, id: c.id }))}'>${esc(c.name)} · ${c.stats[stat === 'Politics' ? 'pol' : stat === 'Intellect' ? 'int' : 'lea']}</button>`).join('')}</div></div>`;
+  };
+  return `<div class="card"><h3>🪶 Your council</h3><div class="sub">Councillors act on their own; pick people strong in the stat that matters.</div>
+    ${seat('stewardId', 'Steward', 'Politics', 'Raises income with their Politics, and sends grain to your own starving holdings.')}
+    ${seat('spymasterId', 'Spymaster', 'Intellect', 'Uncovers plots against you and runs your spies in war.')}
+    ${seat('captainId', 'Captain of the Guard', 'Leadership', 'Helps catch assassins. Can set the guard for you as threats rise and fall.')}
+    ${w.captain(r) ? `<div class="chips" style="margin-top:6px"><button class="chip ${r.guardAuto ? 'on' : ''}" data-act='${JSON.stringify({ type: 'guardAuto', on: !r.guardAuto })}'>${r.guardAuto ? '✓ ' : ''}Let the captain set the guard</button></div>` : ''}</div>`;
+}
+function granaries(w, r) {
+  const mine = w.realmSetts(r);
+  const starving = w.setts.filter(s => s.famine && !s.destroyed && mine.some(m => w.dist(m, s) < 9)).slice(0, 6);
+  return `<div class="card"><h3>🌾 Granaries</h3>
+    <div class="sub">${mine.map(s => `${esc(s.name)}: ${s.famine ? '<b style="color:#ffcf70">famine</b>' : Math.round(s.food) + ' food'}`).join(' · ')}</div>
+    ${starving.length ? `<div class="sub" style="margin-top:8px">Starving nearby. Feeding your own calms them; feeding others wins hearts, and free villages may join you:</div><div class="abtns">${starving.map(s => btn(`${esc(s.name)}${s.realmId === r.id ? ' (yours)' : ''} · ${w.grainCost(s)}g`, { type: 'grain', sett: s.id })).join('')}</div>` : '<div class="sub" style="margin-top:6px">No famine within reach.</div>'}</div>`;
+}
+function armies(w, r) {
+  const offs = w.realmOfficers(r);
+  if (!offs.length) return '';
+  const used = r.leviedYear === w.year ? r.levied || 0 : 0; const left = Math.max(0, w.levyCap(r) - used);
+  return `<div class="card"><h3>🛡 Armies</h3><div class="sub">Levies left this year: ${left} (2 troops per gold). Swapping armies gives your best troops to your best officer.</div>
+    ${offs.map(o => `<div class="arow"><div><b>${esc(o.name)}</b>${o.titles.rank ? ` <span class="tag title">${esc(o.titles.rank)}</span>` : ''}<div class="sub">${o.army.size} ${esc(w.plural(w.unitName(o.army)))} · ${w.troopTier(o.army)} · Lead ${o.stats.lea}</div></div><div class="abtns">${btn('+50', { type: 'levy', id: o.id, n: 50 })}</div></div>
+      ${offs.length > 1 ? `<div class="chips">${offs.filter(x => x.id !== o.id).slice(0, 4).map(x => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'transfer', from: o.id, to: x.id }))}'>Swap with ${esc(x.name)}</button>`).join('')}</div>` : ''}`).join('')}</div>`;
+}
+function family(w, p, r) {
+  const kids = p.children.map(id => w.char(id)).filter(k => k && k.alive);
+  if (!kids.length) return '';
+  const others = w.realmList().filter(x => x.id !== r.id && x.tier !== 'Village' && !w.atWar(r, x)).slice(0, 5);
+  return `<div class="card"><h3>👪 Your children</h3>${kids.map(k => {
+    const matches = !k.spouseId && !k.betrothed && w.age(k) >= 8 ? w.royalMatches(k) : [];
+    return `<div class="arow" style="display:block"><div><button class="pill" data-char="${k.id}">${esc(k.name)}</button> <span class="sub">age ${w.age(k)}${k.spouseId ? ` · wed to ${esc(w.char(k.spouseId)?.name || '')}` : k.betrothed ? ` · betrothed to ${esc(w.char(k.betrothed)?.name || '')}` : ''}${k.wardOf ? ` · ward at ${esc(w.realm(k.wardOf)?.name || '')}` : ''}</span></div>
+      ${matches.length ? `<div class="sub" style="margin-top:4px">Arrange a match with a ruling house (an alliance while they live):</div><div class="chips">${matches.map(m => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'arrange', child: k.id, match: m.k.id }))}'>${esc(m.k.name)} of ${esc(m.r.name)}</button>`).join('')}</div>` : ''}
+      ${w.age(k) < 16 && !k.wardOf && others.length ? `<div class="sub" style="margin-top:4px">Send as a ward (ten years of peace with that realm):</div><div class="chips">${others.map(o => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'ward', child: k.id, realm: o.id }))}'>${esc(o.name)}</button>`).join('')}</div>` : ''}</div>`;
+  }).join('')}</div>`;
 }
