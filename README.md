@@ -1,15 +1,15 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.1
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.2
 
-A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, somewhere in a world that has already lived through thirty years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
+A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
 On your phone, open the link and choose **Add to Home Screen**. It runs full-screen and works offline.
 
 ## How to play
 
 1. **Create your character** on the 🛡 You tab: origin, culture (ten of them), name, and ironman or casual.
-2. **Live:** press ▶ or skip ahead a year or ten. Time stops whenever something happens to you.
+2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every two minutes. You can pause (❚❚), but you can't hurry time: you only control yourself.
 3. **Act** from the You tab, or by tapping things on the 🗺 Map: travel, take contracts, raise armies, marry, scheme, fight.
 4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
 5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
@@ -174,4 +174,13 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **The land changes:** earthquakes open caves that monsters crawl out of, summer wildfires burn forests back to open land, and spring floods turn coastal fields to marsh. Any of them can wipe out a village.
 - **Map:** only the part of the map on screen is drawn, so big worlds stay smooth; continent names show when zoomed out and wild names up close; the Stats tab lists the lands and wilds.
 - **New art from the HAS pack:** the sailing ship, docks, lighthouse and the cave entrance.
+
+## 2.2: live, map-first play
+
+- **The map is the main screen.** You land on it when a game starts or loads, and the camera follows you. Pan away to look around, then tap **⌖ You** to come back.
+- **Real time:** one month passes every two minutes, shown as a day count and a bar under the date. ❚❚ pauses the whole world. There are no more skip buttons: you control yourself, not time.
+- **Smooth movement:** armies, fleets, caravans, spies and you glide across the map through the month instead of jumping.
+- **Officers on the march** each ride with a couple of their soldiers, so a host shows who leads it.
+- **Two ways in:** start on the first day of Year 1, or be dropped into a world that has lived through a random 30 to 100 years.
+- **The world waits only when it must:** for your battles, a duel challenge, or the end of your line. Everything else arrives as a notice while time keeps running.
 

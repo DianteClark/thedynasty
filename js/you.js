@@ -13,16 +13,18 @@ const ORIGINS = [
 ];
 let stance = 'balanced';
 export function setStance(v) { stance = v; }
-const form = { origin: 'vagabond', culture: 'aldmark', name: '', female: false, mode: 'ironman', size: 'large', seed: '' };
+const form = { origin: 'vagabond', culture: 'aldmark', name: '', female: false, mode: 'ironman', size: 'large', seed: '', start: 'history' };
 
 function unitIcon(f, u, px = 36) { return `<span class="uicon" style="width:${px}px;height:${px}px;background:url(assets/units/${f}.png) 0 -${u * px}px / ${px * 20}px auto no-repeat"></span>`; }
 
 export function renderCreation(view, world, isNewLife) {
   const sizeRow = isNewLife ? '' : `<label class="field"><span>World size</span></label><div class="chips">${Object.entries(SIZES).map(([k, v]) => `<button class="chip ${form.size === k ? 'on' : ''}" data-f="size" data-v="${k}">${v.label}</button>`).join('')}</div>
+    <label class="field"><span>When you arrive</span></label><div class="chips"><button class="chip ${form.start === 'fresh' ? 'on' : ''}" data-f="start" data-v="fresh">The first day (Year 1)</button><button class="chip ${form.start === 'history' ? 'on' : ''}" data-f="start" data-v="history">Into history (Year 30–100)</button></div>
+    <div class="sub" style="margin:4px 2px">${form.start === 'fresh' ? 'A young world: no grudges yet, no legends, every throne up for grabs.' : 'The world lives through decades of wars, dynasties and disasters before you are dropped into it.'}</div>
     <label class="field"><span>World seed (optional, share it to give a friend the same world)</span><input id="fSeed" value="${esc(form.seed)}" placeholder="random" autocomplete="off"></label>`;
   view.innerHTML = `
     <div class="card hero-card"><h3>${isNewLife ? 'A new life in this world' : 'Begin your story'}</h3>
-      <div class="sub">${isNewLife ? 'The world remembers what came before. Choose who you are now.' : 'A world is born and lives through 30 years of history. Then you are dropped somewhere in it. One life; name a successor or your story ends with you.'}</div></div>
+      <div class="sub">${isNewLife ? 'The world remembers what came before. Choose who you are now.' : 'A world is born, and you are dropped somewhere in it. Time runs on its own: a month passes every two minutes, and you can only pause it. One life; name a successor or your story ends with you.'}</div></div>
     <h2 class="sec">Origin</h2>
     ${ORIGINS.map(o => `<button class="card tap origin ${form.origin === o.id ? 'on' : ''}" data-f="origin" data-v="${o.id}"><b>${o.name}</b><div class="sub">${o.blurb}</div></button>`).join('')}
     <h2 class="sec">Culture</h2>

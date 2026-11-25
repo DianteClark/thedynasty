@@ -21,7 +21,7 @@ Each build is playable on its own and adds one layer. The order follows what eac
 | Build | Focus | What it adds |
 | --- | --- | --- |
 | 2.1 ✅ | Huge world | Continents and islands, territories, ports and sailing, named wilds and named monsters, caves, earthquakes, wildfires and floods that change the land, a chunked map renderer for the bigger worlds |
-| 2.2 | Live map-first play | The map is the main screen; time runs at 2 minutes a month with pause only; the camera follows you; start at year 1 or dropped into a random year 30–100 |
+| 2.2 ✅ | Live map-first play | The map is the main screen; time runs at 2 minutes a month with pause only; the camera follows you; start at year 1 or dropped into a random year 30–100 |
 | 2.3 | Knowledge and fog | A cartographer's map that stays drawn until nature changes it; you only know what history, locals, travel and spies tell you |
 | 2.4 | Dynasty Warriors battles | 3–5 bases a side with garrisons that sleep until enemies come near, 1–8 officers, the lord's reserve (Defend, Push, Reinforce), stratagems on bases, up to 30,000 troops, Mid zoom cap and officer portraits |
 

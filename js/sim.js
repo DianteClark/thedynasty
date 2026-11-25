@@ -363,6 +363,11 @@ export class World {
 
   // ---------- main loop ----------
   tick() {
+    // where every mover was at the start of the month, so the map can glide them along in real time
+    const prev = this._prev = new Map();
+    for (const w of this.wars) if (w.march) prev.set('w' + w.id, [w.march.x, w.march.y]);
+    for (const a of this.agents || []) prev.set('a' + a.id, [a.x, a.y]);
+    const P = this.player; if (P) prev.set('p' + P.id, [P.x, P.y]);
     this.month++;
     if (this.month >= 12) { this.month = 0; this.year++; this.yearly(); }
     this.economy();
@@ -2200,7 +2205,7 @@ export class World {
   toJSON() {
     const o = {};
     for (const [k, v] of Object.entries(this)) {
-      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', '_own', '_sea', 'ocean', 'landId', 'wildId', 'terr'].includes(k) || typeof v === 'function') continue;
+      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', 'ocean', 'landId', 'wildId', 'terr'].includes(k) || k[0] === '_' || typeof v === 'function') continue;
       o[k] = v;
     }
     o.chars = [...this.chars.values()];

@@ -24,7 +24,9 @@ let W = null, root = null, canvas, g, mini, mg, terrainKey = '', ownerKey = '';
 const CH = 32; // cells per map chunk (512px): only the chunks on screen are ever drawn
 const tChunks = new Map(), oChunks = new Map();
 const BCOL = { water: [34, 66, 104], plains: [112, 168, 76], forest: [44, 112, 54], swamp: [78, 104, 86], wasteland: [196, 168, 104], tundra: [226, 232, 238], mountain: [118, 100, 90] };
-let cam = { x: 0, y: 0, z: 1 }, raf = 0, sel = null, cb = {}, dpr = 1;
+let cam = { x: 0, y: 0, z: 1, follow: true }, raf = 0, sel = null, cb = {}, dpr = 1;
+// movers glide between where they were at the start of the month and where they are now
+function at(key, o) { const p = W._prev && W._prev.get(key); const f = W._frac || 0; return p ? { x: p[0] + (o.x - p[0]) * f, y: p[1] + (o.y - p[1]) * f } : { x: o.x, y: o.y }; }
 
 export async function mountMap(container, world, callbacks) {
   W = world; cb = callbacks;
@@ -32,12 +34,12 @@ export async function mountMap(container, world, callbacks) {
   await loadArt();
   root = document.createElement('div'); root.className = 'wmap';
   root.innerHTML = `<canvas class="wm"></canvas><canvas class="wmini" width="168" height="112"></canvas>
-    <button class="bbtn wzoom" data-w="fit" aria-label="Zoom out">⤢</button><div class="wcard" id="wcard" hidden></div>`;
+    <button class="bbtn wzoom" data-w="fit" aria-label="Zoom out">⤢</button><button class="bbtn wfollow" data-w="follow" aria-label="Back to you" hidden>⌖ You</button><div class="wcard" id="wcard" hidden></div>`;
   container.innerHTML = ''; container.appendChild(root);
   document.body.classList.add('map-mode');
   canvas = root.querySelector('.wm'); g = canvas.getContext('2d'); mini = root.querySelector('.wmini'); mg = mini.getContext('2d');
   fit(); window.addEventListener('resize', fit);
-  if (!cam.init || cam.world !== W) { const cap = biggestCapital(); cam = { x: cap ? cap.x * T : W.w * T / 2, y: cap ? cap.y * T : W.h * T / 2, z: 1.6, init: true, world: W }; }
+  if (!cam.init || cam.world !== W) { const P = W.player && W.player.alive ? W.player : biggestCapital(); cam = { x: P ? P.x * T : W.w * T / 2, y: P ? P.y * T : W.h * T / 2, z: 1.8, init: true, world: W, follow: true }; }
   bind();
   cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
 }
@@ -175,7 +177,11 @@ function clamp() {
   cam.y = vh >= MH ? MH / 2 : Math.max(vh / 2, Math.min(MH - vh / 2, cam.y));
 }
 function draw(t) {
-  invalidate(); clamp();
+  invalidate();
+  const P0 = W.player;
+  if (cam.follow && P0 && P0.alive && P0.x != null) { const p = at('p' + P0.id, P0); cam.x += (p.x * T + 8 - cam.x) * 0.12; cam.y += (p.y * T + 8 - cam.y) * 0.12; }
+  const fb = root.querySelector('[data-w=follow]'); if (fb) fb.hidden = cam.follow || !(P0 && P0.alive);
+  clamp();
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.imageSmoothingEnabled = false;
   g.fillStyle = '#0d1820'; g.fillRect(0, 0, root._w, root._h);
   g.setTransform(cam.z * dpr, 0, 0, cam.z * dpr, (root._w / 2 - cam.x * cam.z) * dpr, (root._h / 2 - cam.y * cam.z) * dpr);
@@ -222,13 +228,20 @@ function draw(t) {
     const m = w.march; if (!m) continue;
     const att = W.realm(m.att), tgt = W.sett(m.target); if (!att || !tgt) continue;
     const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
-    const mx = m.x * T + 8, my = m.y * T + 10;
+    const mp = at('w' + w.id, m); const mx = mp.x * T + 8, my = mp.y * T + 10;
     g.strokeStyle = att.color; g.lineWidth = 1.5 / cam.z; g.setLineDash([4, 4]); pathLine(mx, my, m.path, tgt); g.setLineDash([]);
     const nxt = m.path && m.path[0] || tgt; const flip = nxt.x < m.x;
     if (m.atSea) { drawShip(mx, my, nxt.x - m.x, nxt.y - m.y, t, 1.6); drawShip(mx - 12, my + 6, nxt.x - m.x, nxt.y - m.y, t + 0.5, 1.2); }
     else {
-      g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(mx, my + 1, 18, 5, 0, 0, 7); g.fill();
-      offs.slice(0, 3).forEach((o, i) => drawUnitSprite(o.army.faction, o.army.unit, mx + (i - 1) * 11, my + (i % 2) * 4, flip, t + i * 0.3, 1.3));
+      // each officer rides with a couple of their soldiers
+      offs.slice(0, 3).forEach((o, i) => {
+        const ox = mx + (i - 1) * 22 * (flip ? -1 : 1) * 0.8, oy = my + (i % 2) * 7;
+        g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(ox, oy + 1, 13, 4, 0, 0, 7); g.fill();
+        drawUnitSprite(o.army.faction, o.army.unit, ox + (flip ? 7 : -7), oy - 4, flip, t + i * 0.3 + 0.2, 0.95);
+        drawUnitSprite(o.army.faction, o.army.unit, ox + (flip ? 8 : -8), oy + 3, flip, t + i * 0.3 + 0.5, 0.95);
+        const lead = W.pickUnitView(o, o.army.faction);
+        drawUnitSprite(o.army.faction, lead, ox, oy, flip, t + i * 0.3, 1.3);
+      });
     }
     g.fillStyle = att.color; g.fillRect(mx - 1, my - 34, 2, 16); g.fillRect(mx + (flip ? -11 : 1), my - 34, 10, 7);
     if (sel?.kind === 'march' && sel.war === w) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(mx, my - 6, 18, 0, 7); g.stroke(); }
@@ -238,8 +251,8 @@ function draw(t) {
   for (const a of W.agents || []) {
     const mine = pr && a.owner === pr.id;
     if (W.hiddenKind(a) && !a.revealed && !mine) continue;
-    if (!vis(a.x, a.y)) continue;
-    const ax = a.x * T + 8, ay = a.y * T + 10;
+    const ap = at('a' + a.id, a); if (!vis(ap.x, ap.y)) continue;
+    const ax = ap.x * T + 8, ay = ap.y * T + 10;
     if (a.atSea && a.kind !== 'rumor') { const nx = a.path && a.path[0]; drawShip(ax, ay, nx ? nx.x - a.x : 1, nx ? nx.y - a.y : 0, t + a.id * 0.2, 1); }
     else if (a.kind === 'rumor') {
       g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.ellipse(ax, ay - 10, 7, 5, 0, 0, 7); g.fill(); g.beginPath(); g.moveTo(ax - 2, ay - 6); g.lineTo(ax - 5, ay - 2); g.lineTo(ax + 1, ay - 6); g.fill();
@@ -259,8 +272,8 @@ function draw(t) {
   }
   // you
   const P = W.player;
-  if (P && P.alive && P.x != null && (P.role === 'vagabond' || P.task)) {
-    const px = P.x * T + 8, py = P.y * T + 10;
+  if (P && P.alive && P.x != null && !(P.role !== 'vagabond' && !P.task && !P.atSea)) {
+    const pp = at('p' + P.id, P); const px = pp.x * T + 8, py = pp.y * T + 10;
     const dest = P.task ? (P.task.lair ? W.lairs.find(l => l.id === P.task.lair) : P.task.bandit ? W.char(P.task.bandit) : W.sett(P.task.to)) : null;
     if (dest) { g.strokeStyle = '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.setLineDash([3, 4]); pathLine(px, py, P.path, dest); g.setLineDash([]); }
     g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.ellipse(px, py + 1, 11, 4, 0, 0, 7); g.stroke();
@@ -269,6 +282,10 @@ function draw(t) {
     if (P.atSea && nx) drawShip(px, py, nx.x - P.x, nx.y - P.y, t, 1.5);
     else drawUnitSprite(f, u, px, py, nx ? nx.x < P.x : false, P.task ? t : 0, 1.4);
     g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(px - 11, py - 34, 22, 10); g.fillStyle = '#ffd76a'; g.fillText('You', px, py - 26);
+  }
+  if (P && P.alive && P.x != null && P.role !== 'vagabond' && !P.task && !P.atSea) {
+    const pp = at('p' + P.id, P); const px = pp.x * T + 8, py = pp.y * T - 22;
+    g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(px - 12, py - 9, 24, 11); g.fillStyle = '#ffd76a'; g.fillText('You', px, py);
   }
   // labels: continents and islands when zoomed out, named wilds up close
   g.textBaseline = 'middle'; g.textAlign = 'center';
@@ -327,14 +344,15 @@ function bind() {
     const p = pts.get(e.pointerId); if (!p) return;
     if (pts.size === 2 && pinch) { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, b] = [...pts.values()]; cam.z = Math.max(0.5, Math.min(5, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)); moved = true; return; }
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) moved = true;
-    if (moved) { cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
+    if (moved) { cam.follow = false; cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; }
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   });
   const up = e => { const wasPinch = pts.size > 1; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!moved && !wasPinch && e.type === 'pointerup') tap(e); };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('wheel', e => { e.preventDefault(); cam.z = Math.max(0.5, Math.min(5, cam.z * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
-  mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * W.w * T; cam.y = (e.clientY - r.top) / r.height * W.h * T; });
-  root.querySelector('[data-w=fit]').onclick = () => { cam.z = cam.z > 0.8 ? 0.5 : 1.6; };
+  mini.addEventListener('pointerdown', e => { cam.follow = false; const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * W.w * T; cam.y = (e.clientY - r.top) / r.height * W.h * T; });
+  root.querySelector('[data-w=fit]').onclick = () => { cam.z = cam.z > 0.8 ? 0.5 : 1.8; };
+  root.querySelector('[data-w=follow]').onclick = () => { cam.follow = true; };
   root.querySelector('#wcard').addEventListener('click', e => {
     const t = e.target.closest('[data-wr],[data-wc],[data-wclose],[data-wact]'); if (!t) return;
     if (t.dataset.wact) { cb.act(JSON.parse(t.dataset.wact)); return; }
@@ -349,10 +367,10 @@ function tap(e) {
   const reach = Math.max(14, 26 / cam.z);
   let best = null, bd = reach * reach;
   const consider = (kind, x, y, obj) => { const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
-  for (const w of W.wars) if (w.march) consider('march', w.march.x * T + 8, w.march.y * T + 2, { war: w });
+  for (const w of W.wars) if (w.march) { const mp = at('w' + w.id, w.march); consider('march', mp.x * T + 8, mp.y * T + 2, { war: w }); }
   for (const L of W.lairs) if (L.alive && (L.strength >= 15 || L.cave)) consider('lair', L.x * T + 8, L.y * T, { lair: L });
   const prr = W.playerRealm && W.playerRealm();
-  for (const a of W.agents || []) { if (W.hiddenKind(a) && !a.revealed && !(prr && a.owner === prr.id)) continue; consider('agent', a.x * T + 8, a.y * T + 4, { agent: a }); }
+  for (const a of W.agents || []) { if (W.hiddenKind(a) && !a.revealed && !(prr && a.owner === prr.id)) continue; const ap = at('a' + a.id, a); consider('agent', ap.x * T + 8, ap.y * T + 4, { agent: a }); }
   for (const s of W.setts) consider('sett', s.x * T + 8, s.y * T + 4, { id: s.id });
   sel = best; card();
 }

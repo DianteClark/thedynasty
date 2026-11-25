@@ -1,4 +1,4 @@
-import { World, SIZES, TROOP_TIERS } from './sim.js';
+import { World, SIZES, TROOP_TIERS, MONTHS } from './sim.js';
 import { cultureById } from './names.js';
 import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle } from './battleview.js';
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
@@ -9,10 +9,10 @@ import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const SAVE_KEY = 'dynasty.save.v2';
-const HISTORY_YEARS = 30;
+const MONTH_MS = 120000; // one month of the world passes every two minutes
 const TYPE_LABELS = { you: 'You', war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
-let world, playing = false, busy = false, tab = 'you', watchMode = 'big', creatingLife = false;
+let world, playing = true, busy = false, tab = 'you', acc = 0, watchMode = 'big', creatingLife = false;
 const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null };
 
 // ---------- save / load ----------
@@ -35,7 +35,6 @@ function toast(text, kind = '') {
 }
 
 async function rebuild(saved) {
-  playing = false; setPlayBtn();
   world = new World(saved.seed, saved.size); setWorld(world);
   world.replaying = true; world.replayLog = saved.battleLog || {}; world.actions = (saved.actions || []).slice();
   const acts = saved.actions || []; let k = 0;
@@ -45,17 +44,18 @@ async function rebuild(saved) {
   world.watchMode = watchMode === 'off' ? null : watchMode;
 }
 async function newGame(f) {
-  playing = false; setPlayBtn();
   const s = slots();
   if (s.list.length >= MAX_SLOTS) { const oldest = s.list.slice().sort((a, b) => a.savedAt - b.savedAt)[0]; await deleteWorld(oldest.id); }
   slotId = newSlotId(); setCurrent(slotId);
-  view.innerHTML = `<div class="empty">A world is being born.<br>Kingdoms rise, wars are fought, dynasties begin.<br>Thirty years of history are being written before you arrive.</div>`; window.scrollTo(0, 0);
+  const years = f.start === 'fresh' ? 0 : 30 + Math.floor(Math.random() * 71);
+  view.innerHTML = `<div class="empty">A world is being born.<br>${years ? `Kingdoms rise, wars are fought, dynasties begin.<br>${years} years of history are being written before you arrive.` : 'Its first rulers are only now taking their thrones.'}</div>`; window.scrollTo(0, 0);
   world = new World(f.seed || randomSeed(), f.size, getMod()); setWorld(world);
   world.watchMode = null;
-  await runMonths(HISTORY_YEARS * 12, { quiet: true, label: 'Thirty years of history unfold' });
+  if (years) await runMonths(years * 12, { quiet: true, label: `${years} years of history unfold` });
   world.watchMode = watchMode === 'off' ? null : watchMode;
   const msg = world.act({ type: 'start', origin: f.origin, culture: f.culture, name: f.name, female: f.female, mode: f.mode });
-  save(); tab = 'you'; selectTab(); render(); toast(msg);
+  acc = 0; playing = true; setPlayBtn();
+  save(); tab = 'map'; selectTab(); render(); toast(msg);
 }
 
 // ---------- time ----------
@@ -111,24 +111,42 @@ function resolvePending() {
   });
 }
 let pendingChoice = null;
-let lastTick = 0, lastCount = 0;
+let lastFrame = 0, lastCount = 0, lastChallenge = '';
+// The world runs in real time: you can pause it, but never hurry it.
 function loop(t) {
-  if (playing && !busy && world && t - lastTick > 220) {
-    lastTick = t;
-    const from = world.chronicle.length;
-    world.tick(); updateHeader();
-    if (world.pendingBattle) { busy = true; resolvePending().then(() => { busy = false; lastTick = performance.now(); }); }
-    const e = playerEvent(from);
-    if (e) { playing = false; setPlayBtn(); save(); toast(e.text, 'you'); render(); }
-    const n = world.chronicle.filter(x => x.importance >= ui.level).length;
-    if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || world.month === 0) { lastCount = n; render(true); }
-    if (world.month === 0) save();
+  const dt = Math.min(250, t - (lastFrame || t)); lastFrame = t;
+  if (playing && !busy && world && world.playerId && tab !== 'battle' && !document.hidden && !$('#sheetWrap').dataset.locked) {
+    acc += dt;
+    if (acc >= MONTH_MS) { acc -= MONTH_MS; monthPasses(); }
   }
+  if (world) world._frac = Math.min(1, acc / MONTH_MS);
+  updateHeader();
   requestAnimationFrame(loop);
 }
-function setPlayBtn() { const b = $('#btnPlay'); b.textContent = playing ? '❚❚' : '▶'; b.setAttribute('aria-label', playing ? 'Pause' : 'Play'); }
-function setBusy(on) { for (const id of ['#btnPlay', '#btnYear', '#btnTen', '#btnHundred', '#btnWorld']) $(id).disabled = on; }
-function updateHeader() { if (!world) return; $('#date').textContent = world.dateLabel(); $('#season').textContent = world.season; }
+function monthPasses() {
+  const from = world.chronicle.length;
+  world.tick();
+  if (world.pendingBattle) { busy = true; resolvePending().then(() => { busy = false; }); }
+  const e = playerEvent(from);
+  if (e) toast(e.text, 'you');
+  const p = world.player;
+  // a few things need an answer from you: the world waits for those
+  const ch = p && p.challenge ? JSON.stringify(p.challenge) : '';
+  if ((ch && ch !== lastChallenge) || world.gameOver) { lastChallenge = ch; playing = false; setPlayBtn(); render(); if (ch) toast('You have been challenged. The world waits for your answer on the You tab.', 'you'); }
+  const n = world.chronicle.filter(x => x.importance >= ui.level).length;
+  if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || tab === 'you') { lastCount = n; render(tab !== 'you'); }
+  save();
+}
+function setPlayBtn() { const b = $('#btnPlay'); b.textContent = playing ? '❚❚' : '▶'; b.setAttribute('aria-label', playing ? 'Pause' : 'Resume'); document.querySelector('.clock').classList.toggle('paused', !playing); }
+function setBusy(on) { for (const id of ['#btnPlay', '#btnWorld']) $(id).disabled = on; }
+let lastDate = '';
+function updateHeader() {
+  if (!world) return;
+  const day = 1 + Math.min(29, Math.floor((world._frac || 0) * 30));
+  const label = `Day ${day} of ${MONTHS[world.month]}, Year ${world.year}`;
+  if (label !== lastDate) { lastDate = label; $('#date').textContent = label; $('#season').textContent = world.season + (playing || !world.playerId ? '' : ' · paused'); }
+  $('#monthBar').style.width = ((world._frac || 0) * 100).toFixed(1) + '%';
+}
 function selectTab() { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); }
 
 // ---------- helpers ----------
@@ -173,7 +191,7 @@ function renderChronicle() {
   entries = entries.slice(-ui.shown).reverse();
   let html = `<div class="chips">${[[3, 'Major'], [2, 'Notable'], [1, 'Everything']].map(([l, n]) => `<button class="chip ${ui.level === l ? 'on' : ''}" data-level="${l}">${n}</button>`).join('')}</div>
   <div class="chips">${types.map(t => `<button class="chip ${ui.type === t ? 'on' : ''}" data-type="${t}">${t === 'all' ? 'All events' : TYPE_LABELS[t]}</button>`).join('')}</div>`;
-  if (!entries.length) html += `<div class="empty">Nothing recorded yet.<br>Press ▶ to let the world live, or jump ahead with +1, +10 or +100 years.</div>`;
+  if (!entries.length) html += `<div class="empty">Nothing recorded yet.<br>The world is young, or quiet. Give it time.</div>`;
   let lastY = null;
   for (const e of entries) {
     if (e.y !== lastY) { html += `<div class="year">Year ${e.y}</div>`; lastY = e.y; }
@@ -438,10 +456,8 @@ document.addEventListener('click', ev => {
 });
 $('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap' && !$('#sheetWrap').dataset.locked) closeSheet(); });
 const ready = () => world && world.playerId && !busy;
-$('#btnPlay').onclick = () => { if (!ready()) return; playing = !playing; setPlayBtn(); };
-$('#btnYear').onclick = () => ready() && runMonths(12);
-$('#btnTen').onclick = () => ready() && runMonths(120);
-$('#btnHundred').onclick = () => ready() && runMonths(1200);
+$('#btnPlay').onclick = () => { if (!ready()) return; playing = !playing; lastDate = ''; setPlayBtn(); };
+window.dynastySkip = m => ready() && runMonths(m); // for testing only: the game itself never skips time
 $('#btnWorld').onclick = () => !busy && (world ? worldSheet() : savesOnlySheet());
 function savesOnlySheet() {
   openSheet(`<h2>Saves</h2>${slots().list.map(x => `<div class="card"><b>${esc(x.who)}</b><div class="sub">Year ${x.year} · seed “${esc(x.seed)}”</div><div class="abtns"><button class="abtn" data-load-slot="${x.id}">Continue</button><button class="abtn" data-del-slot="${x.id}">Delete</button></div></div>`).join('') || '<div class="sub">No saves yet.</div>'}`);
@@ -462,7 +478,7 @@ async function openSlot(id) {
     world = World.restore(snap); setWorld(world); slotId = id; setCurrent(id);
     world.watchMode = watchMode === 'off' ? null : watchMode;
   } catch (e) { world = null; slotId = null; toast('That save could not be opened.'); }
-  playing = false; setPlayBtn(); if (tab === 'map') unmountMap(); tab = 'you'; selectTab(); render();
+  acc = 0; playing = true; setPlayBtn(); if (tab === 'map') unmountMap(); tab = world && world.playerId && !world.gameOver ? 'map' : 'you'; selectTab(); render();
 }
 document.addEventListener('change', ev => {
   if (ev.target.id !== 'modFile') return;

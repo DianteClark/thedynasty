@@ -183,3 +183,12 @@ button.card { width: 100%; text-align: left; color: var(--ink); font: inherit; d
 .bbtn.pend { border-color: var(--gold); color: var(--gold); animation: pend 1s ease-in-out infinite alternate; }
 @keyframes pend { from { box-shadow: 0 0 0 0 rgba(217,164,65,.0); } to { box-shadow: 0 0 0 3px rgba(217,164,65,.45); } }
 @media (prefers-reduced-motion: reduce) { .bbtn.pend { animation: none; } }
+
+/* 2.2 live clock */
+.clock { display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: center; }
+.clock .ctl { padding: 9px 0; }
+.clock .when .date { margin: 0 0 5px; }
+.mbar { height: 4px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+.mbar > div { height: 100%; width: 0; background: var(--gold); }
+.clock.paused .mbar > div { background: var(--dim); }
+.wfollow { position: absolute; right: 8px; top: 56px; }
