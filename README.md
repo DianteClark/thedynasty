@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.7
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.8
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -237,4 +237,12 @@ The big moments of a life are now small scenes, drawn in HAS art in front of you
 - **Oath-swearing:** seal a brotherhood in blood for a bond that only death breaks.
 - **Knighting:** when you grant a rank, the officer kneels before the court; gift a warhorse and they'll remember it.
 - **Feasts:** hold one from the Court (50 gold, twice a year at most). Usually your officers drink to your name. Sometimes a rival mocks you before the hall: duel them, answer with wit, or have them thrown out.
+
+## 2.8: meetings, diplomacy and missions
+
+- **Envoys:** from the Court's new 🕊 Diplomacy panel, send an envoy (10 gold) with an offer: an alliance, a five-year truce, or a demand for tribute; peace terms in a war; or a marriage match for one of your children. The envoy rides the map (you can watch them go) and the answer comes when they arrive. Your Charisma, fame and what their ruler thinks of you decide it; demanding tribute from someone braver than they are wise can start a war.
+- **Audiences:** travel to another ruler's seat and request an audience in person. Being there counts for more than any envoy. Without a realm of your own, you can offer your service or ask for news of the realm.
+- **Missions for officers:** if you serve a lord, they send for you: scout a rival's seat (and bring back its court's names and titles), carry a letter to another ruler, hunt down a bandit troubling the realm, or come to council. Obey and you're paid and trusted; refuse or fail and your lord remembers.
+- **Your counsel matters:** summoned to council, your lord asks what the realm should do: war, peace or stronger walls. With good Intellect and their trust, they may listen.
+- Officers and lords now bring their own troops when they fight bandits, not just a wanderer's band.
 

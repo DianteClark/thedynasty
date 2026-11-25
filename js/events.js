@@ -195,16 +195,6 @@ const EVENTS = [
     },
   },
   {
-    id: 'orders', where: 'camp', weight: 1.2,
-    when() { const p = this.player; if (p.role !== 'officer') return null; const r = this.playerRealm(); const ru = r && this.char(r.rulerId); return ru && !this.isPlayer(ru) ? { ru: ru.id } : null; },
-    make({ ru }) { const R = this.char(ru); const task = this.pick(['escort the tax wagons through the hills', 'hunt down the brigands troubling the border villages', 'drill the new levies before the spring']); return { who: ru, title: 'Orders from your lord', text: `${this.fullName(R)} summons you: “I need you to ${task}.”`, options: opts(['obey', 'Obey'], ['refuse', 'Refuse']), def: 'refuse', data2: task }; },
-    resolve({ ru }, c) {
-      const R = this.char(ru), p = this.player; if (!R) return '';
-      if (c === 'obey') { this.opine(R, p, 10); p.loyalty = Math.min(100, (p.loyalty || 60) + 5); this.gainXp(p, 30); if (p.army) p.army.xp += 15; p.gold = (p.gold || 0) + 15; return 'You carry out your orders. Your lord is pleased.'; }
-      this.opine(R, p, -25); p.loyalty = Math.max(0, (p.loyalty || 60) - 10); return 'Your lord says nothing, but the court notices.';
-    },
-  },
-  {
     id: 'dice', where: 'camp', weight: 0.9,
     when() { return this.purse() >= 10 ? { k: 1 } : null; },
     make() { return { title: 'Dice by the fire', text: 'The soldiers are throwing dice and the pot is getting big. “Care to try your luck?”', options: opts(['small', 'Stake 10 gold'], ['big', 'Stake 30 gold'], ['no', 'Just watch']), def: 'no' }; },

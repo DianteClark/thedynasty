@@ -7,6 +7,7 @@ import { installKnowledge } from './know.js';
 import { installCourt, COURT_ACTS, HANDLERS } from './court.js';
 import { installEvents, resolveEvent } from './events.js';
 import { installCeremonies, resolveCeremony } from './ceremonies.js';
+import { installDiplomacy, resolveDiplomacy } from './diplomacy.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -407,7 +408,7 @@ export class World {
     this.playerTick();
     this.monthlyLife();
     if (this.kn) this.knowledgeTick();
-    if (this.playerId) { this.jobsTick(); this.ceremoniesTick(); this.councilTick(); this.eventsTick(); this.decisionsTick(); }
+    if (this.playerId) { this.jobsTick(); this.ceremoniesTick(); this.councilTick(); this.missionsTick(); this.eventsTick(); this.decisionsTick(); }
     if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
@@ -1769,7 +1770,8 @@ export class World {
     const p = this.player; const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)] || 'plains';
     const entry = (f, roles) => { const i = UNITS[f].findIndex(u => u.entry && roles.includes(u.role)); return i >= 0 ? i : 0; };
     const mates = this.living().filter(x => x.companionOf === p.id);
-    const yourCount = Math.max(3, (p.followers || 0) + mates.length * 3);
+    // an officer or lord brings their own army; a wanderer brings their band
+    const yourCount = Math.max(3, (p.followers || 0) + mates.length * 3 + (p.army ? Math.min(p.army.size, 400) : 0));
     const cfg = { seed: Math.floor(this.r() * 1e9), terrain: g === 'water' ? 'plains' : g, season: this.season, sides: [
       { faction: p.culture, name: 'Your band', realmId: null, color: '#4fa3ff', ai: 'balanced', canFire: false, mods: { morale: 5, atk: 1 }, divisions: [{ faction: p.culture, unit: this.pickUnit(p, p.culture), count: yourCount, level: Math.min(10, 1 + Math.floor(p.level / 2)), officer: { name: p.name, stats: p.stats, ref: p.id } }] },
       { faction: b.culture, name: `${b.name}'s bandits`, realmId: null, color: '#ff5a4a', ai: ambush ? 'reckless' : 'balanced', canFire: false, mods: { morale: ambush ? 8 : 0, atk: 1 }, divisions: [{ faction: b.culture, unit: entry(b.culture, ['inf', 'cav']), count: Math.max(4, b.band), level: 2, officer: { name: b.name, stats: b.stats, ref: b.id } }] },
@@ -1783,6 +1785,7 @@ export class World {
     const mine = b.divisions[0], theirs = b.divisions[1];
     const survive = (b.aliveCount(mine) + mine.fled) / mine.start;
     p.followers = Math.max(0, Math.round((p.followers || 0) * survive));
+    if (p.army) p.army.size = Math.max(10, Math.round(p.army.size * (0.8 + 0.2 * survive)));
     if (!mine.officer.alive) { this.die(p, `cut down by the bandits of ${band.name}`); return; }
     if (won) {
       const reward = 20 + band.band; p.gold = (p.gold || 0) + reward; p.fame += 8; p.kills++; this.gainXp(p, 40);
@@ -2136,6 +2139,7 @@ export class World {
       if (this.dist(t, a) > 2.5) { if (this.isPlayer(by)) this.you(`Your assassin reaches ${dest.name || 'their mark'}, but ${t.name} is not there.`, [t.id], 1); return; }
       return this.assassination(by, t, a.data.motive || 'for gold');
     }
+    if (a.kind === 'envoy' && a.data.proposal) return this.envoyArrives(a);
     if (a.kind === 'envoy') { const w = this.wars.find(x => x.id === a.data.war); if (w && !w.over) this.makePeace(w, this.realm(w.a), this.realm(w.b)); return; }
     if (a.kind === 'caravan') {
       const B = this.realm(dest.realmId); const v = a.data.value || 30;
@@ -2340,3 +2344,5 @@ installEvents(World);
 HANDLERS.event = resolveEvent;
 installCeremonies(World);
 HANDLERS.ceremony = resolveCeremony;
+installDiplomacy(World);
+HANDLERS.audience = HANDLERS.mission = HANDLERS.advice = resolveDiplomacy;

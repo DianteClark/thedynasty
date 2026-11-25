@@ -29,3 +29,8 @@ Each build is playable on its own and adds one layer. The order follows what eac
 
 - ✅ Battle: more forgiving tap targets when selecting divisions
 - ✅ Battle: highlight the order you just gave (button state plus a marker on the map)
+| 2.5 ✅ | Court and decisions | Decision cards with deadlines, council proposals each season, presence rule (your steward rules while you're away), orders that take time, new tabs, HAS portraits; one month per minute |
+| 2.6 ✅ | Encounters and petitions | Road encounters, court petitions and camp happenings |
+| 2.7 ✅ | Ceremonies | Coronations, weddings, funerals, oath-swearings, knightings and feasts as sprite scenes |
+| 2.8 ✅ | Diplomacy and missions | Envoys on the map, audiences in person, officer missions and council advice |
+

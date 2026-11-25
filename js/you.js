@@ -3,6 +3,7 @@ import { CULTURES, cultureById } from './names.js';
 import { SIZES, MON, MONTHS } from './sim.js';
 import { portrait } from './portrait.js';
 import { sceneVerb } from './sceneview.js';
+import { PROPOSALS } from './diplomacy.js';
 import { UNITS } from './battle.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -143,16 +144,37 @@ function actions(w, p, r, rules) {
       ${hire.length ? `<div class="sub" style="margin-top:6px">Wanderers who would serve you (40 gold):</div><div class="abtns">${hire.map(v => btn(`${esc(v.name)} (Lead ${v.stats.lea}, Might ${v.stats.mig})`, { type: 'recruit', id: v.id })).join('')}</div>` : ''}
       <div class="arow"><div><b>Hold a feast</b><div class="sub">50 gold, at most twice a year. Your officers drink to your name, unless someone at the table has other ideas.</div></div>${btn('Feast', { type: 'feast' })}</div>
       ${r.tier !== 'Village' ? `<div class="arow"><div><b>Host a tournament</b><div class="sub">80 gold. Fame, marriage offers, and a crowd an assassin could hide in.</div></div>${btn('Host', { type: 'tournament' })}</div>` : ''}</div>`;
-    h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r);
+    h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r) + diplomacy(w, p, r);
     h += `<div class="card"><h3>⚔ War and peace</h3>
       ${wars.map(x => { const o = w.realm(x.a === r.id ? x.b : x.a); const sc = x.a === r.id ? x.score : -x.score; return `<div class="arow"><div><b>At war with ${esc(o.name)}</b><div class="sub">${esc(x.reason)} · ${x.battles} battle(s) · ${sc > 0 ? 'you are winning' : sc < 0 ? 'you are losing' : 'evenly matched'}</div></div></div>
-        <div class="abtns">${btn('Offer peace', { type: 'peaceTerms', realm: o.id, terms: 'white' })}${btn('Pay 100 gold', { type: 'peaceTerms', realm: o.id, terms: 'gold' })}${btn('Cede a holding', { type: 'peaceTerms', realm: o.id, terms: 'cede' }, 'data-confirm="Give up a holding for peace?"')}${btn('Send a child as ward', { type: 'peaceTerms', realm: o.id, terms: 'ward' })}</div>`; }).join('')}
+        <div class="sub">Send an envoy with terms (10 gold for the road; the answer comes when they arrive):</div>
+        <div class="abtns">${btn('Peace', { type: 'envoy', realm: o.id, proposal: 'peace' })}${btn('Peace for 100 gold', { type: 'envoy', realm: o.id, proposal: 'peace_gold' })}${btn('Peace for a holding', { type: 'envoy', realm: o.id, proposal: 'peace_cede' }, 'data-confirm="Offer a holding for peace?"')}</div>`; }).join('')}
       ${neigh.length ? `<div class="sub">Declare war on a neighbour (strength: yours ${Math.round(w.realmStrength(r)).toLocaleString()}):</div><div class="abtns">${neigh.slice(0, 6).map(o => btn(`${esc(o.name)} (${Math.round(w.realmStrength(o)).toLocaleString()})${r.allies.has(o.id) ? ' · ally!' : ''}`, { type: 'war', realm: o.id }, `data-confirm="Declare war on ${esc(o.name)}?"`)).join('')}</div>` : '<div class="sub">No neighbours within reach.</div>'}
       ${villages.length ? `<div class="sub" style="margin-top:8px">Win over a free village (once a year; charisma, fame and past kindness help):</div><div class="abtns">${villages.slice(0, 5).map(o => btn(esc(o.name), { type: 'persuade', realm: o.id })).join('')}</div>` : ''}</div>`;
   }
   return h;
 }
 
+function diplomacy(w, p, r) {
+  const known = w.realmList().filter(o => o.id !== r.id && w.knowsRealm(o) && o.tier !== 'Village' && !w.atWar(r, o)).sort((a, b) => w.dist(w.sett(a.capital) || a, w.sett(r.capital)) - w.dist(w.sett(b.capital) || b, w.sett(r.capital))).slice(0, 6);
+  if (!known.length) return '';
+  const env = (w.agents || []).filter(a => a.kind === 'envoy' && a.owner === r.id && a.data.proposal);
+  return `<div class="card"><h3>🕊 Diplomacy</h3><div class="sub">Envoys ride the map with your offers (10 gold each). Your Charisma, fame and what their ruler thinks of you decide the answer, and going to their court in person helps more.</div>
+    ${env.length ? `<div class="sub" style="margin-top:6px">On the road: ${env.map(a => `${PROPOSALS[a.data.proposal]} to ${esc(w.realm(a.data.to)?.name || '?')}`).join(' · ')}</div>` : ''}
+    ${known.map(o => { const ru = w.char(o.rulerId); const op = ru ? Math.round(w.op(ru, p)) : 0; return `<div class="arow" style="display:block"><div style="display:flex;gap:8px;align-items:center">${ru ? portrait(ru, 32) : ''}<div><b>${esc(o.name)}</b>${r.allies.has(o.id) ? ' <span class="tag title">ally</span>' : ''}<div class="sub">${ru ? `${esc(ru.name)} thinks ${op > 20 ? 'well' : op < -20 ? 'ill' : 'little'} of you (${op})` : 'No ruler'} · strength ${Math.round(w.realmStrength(o)).toLocaleString()}</div></div></div>
+      <div class="chips">${r.allies.has(o.id) ? '' : `<button class="chip" data-act='${esc(JSON.stringify({ type: 'envoy', realm: o.id, proposal: 'alliance' }))}'>Alliance</button>`}<button class="chip" data-act='${esc(JSON.stringify({ type: 'envoy', realm: o.id, proposal: 'truce' }))}'>Truce</button><button class="chip" data-act='${esc(JSON.stringify({ type: 'envoy', realm: o.id, proposal: 'tribute' }))}'>Demand tribute</button></div></div>`; }).join('')}</div>`;
+}
+function abroad(w, p) {
+  const s = w.sett(p.settId); const their = s && w.realm(s.realmId);
+  if (!their || their.capital !== s.id || their.id === p.realmId || p.task) return '';
+  const ru = w.char(their.rulerId); if (!ru) return '';
+  return `<div class="card"><div style="display:flex;gap:10px;align-items:center">${portrait(ru, 44)}<div><h3>🏰 At the court of ${esc(their.name)}</h3><div class="sub">${esc(ru.name)} holds court here. Ask to be heard: in person, your words carry more weight.</div></div></div><div class="abtns">${btn('Request an audience', { type: 'audience' })}</div></div>`;
+}
+function mission(w, p) {
+  const m = p.mission; if (!m) return '';
+  const left = m.due - w.monthIndex;
+  return `<div class="card"><h3>📯 Your mission</h3><div class="sub"><b>${esc(m.title)}</b> · ${left > 0 ? `${left} month${left === 1 ? '' : 's'} left` : 'overdue'} · ${m.reward} gold when done</div><div class="sub" style="margin-top:4px">${esc(m.text)}</div></div>`;
+}
 function marriage(w, p) {
   let h = '';
   if (!p.spouseId) {
@@ -186,10 +208,10 @@ export function renderCourt(view, w) {
     const other = all.filter(d => !d.court);
     if (other.length) html += `<h2 class="sec">Other matters</h2>` + other.map(d => decisionCard(w, d, true)).join('');
     if (here) html += `<h2 class="sec">Rule</h2>` + actions(w, p, r, rules);
-    else html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Tap any settlement on the Map to travel there.</div></div>`;
+    else html += abroad(w, p) + `<div class="card"><h3>🧭 Travel</h3><div class="sub">Tap any settlement on the Map to travel there.</div></div>`;
   } else {
     if (all.length) html += `<h2 class="sec">Matters for you</h2>` + all.map(d => decisionCard(w, d, true)).join('');
-    html += actions(w, p, r, rules);
+    html += abroad(w, p) + mission(w, p) + actions(w, p, r, rules);
     if (p.role === 'officer') { const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 4); html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">You may ride out between campaigns.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripMonths(p, s)} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`; }
   }
   view.innerHTML = html;
@@ -250,7 +272,7 @@ function family(w, p, r) {
   return `<div class="card"><h3>👪 Your children</h3>${kids.map(k => {
     const matches = !k.spouseId && !k.betrothed && w.age(k) >= 8 ? w.royalMatches(k) : [];
     return `<div class="arow" style="display:block"><div><button class="pill" data-char="${k.id}">${esc(k.name)}</button> <span class="sub">age ${w.age(k)}${k.spouseId ? ` · wed to ${esc(w.char(k.spouseId)?.name || '')}` : k.betrothed ? ` · betrothed to ${esc(w.char(k.betrothed)?.name || '')}` : ''}${k.wardOf ? ` · ward at ${esc(w.realm(k.wardOf)?.name || '')}` : ''}</span></div>
-      ${matches.length ? `<div class="sub" style="margin-top:4px">Arrange a match with a ruling house (an alliance while they live):</div><div class="chips">${matches.map(m => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'arrange', child: k.id, match: m.k.id }))}'>${esc(m.k.name)} of ${esc(m.r.name)}</button>`).join('')}</div>` : ''}
+      ${matches.length ? `<div class="sub" style="margin-top:4px">Arrange a match with a ruling house (an alliance while they live):</div><div class="sub">An envoy rides to their court with your offer.</div><div class="chips">${matches.map(m => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'envoy', proposal: 'match', realm: m.r.id, child: k.id, match: m.k.id }))}'>${esc(m.k.name)} of ${esc(m.r.name)}</button>`).join('')}</div>` : ''}
       ${w.age(k) < 16 && !k.wardOf && others.length ? `<div class="sub" style="margin-top:4px">Send as a ward (ten years of peace with that realm):</div><div class="chips">${others.map(o => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'ward', child: k.id, realm: o.id }))}'>${esc(o.name)}</button>`).join('')}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
