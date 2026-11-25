@@ -16,10 +16,29 @@ export const SEASONS = ['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summe
 export const MONTHS = ['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'];
 const GUARD = { Light: { catch: 0.25, unrest: 0, cost: 0 }, Watchful: { catch: 0.45, unrest: 0.15, cost: 2 }, 'Locked Down': { catch: 0.7, unrest: 0.6, cost: 6 } };
 const TROOP_TIERS = ['Levies', 'Regulars', 'Veterans', 'Elite'];
+// Every monster here has a sprite in the HAS pack (wildlife sheet, boss sheets, elementals).
 const MONSTERS = [
-  { kind: 'wolf pack', power: 1 }, { kind: 'giant boars', power: 1.3 }, { kind: 'swamp hydra', power: 2.4 },
-  { kind: 'wyverns', power: 2.8 }, { kind: 'frost giants', power: 3.2 }, { kind: 'restless shades', power: 2.2 }, { kind: 'red dragon', power: 5 },
+  { key: 'wolves', horde: 'A great wolf pack', the: 'the wolf pack', power: 1, biomes: ['forest', 'plains', 'tundra'], tame: true },
+  { key: 'boars', horde: 'A herd of giant boars', the: 'the giant boars', power: 1.2, biomes: ['forest', 'plains'], tame: true },
+  { key: 'serpents', horde: 'A nest of venom serpents', the: 'the serpent nest', power: 1, biomes: ['swamp', 'wasteland'], tame: false },
+  { key: 'bloodbloom', horde: 'A patch of man-eating bloodblooms', the: 'the bloodblooms', power: 1.8, biomes: ['forest', 'swamp'], tame: false },
+  { key: 'panther', horde: 'A shadow panther', the: 'the shadow panther', power: 2, biomes: ['forest'], tame: true },
+  { key: 'hag', horde: 'A night hag', the: 'the night hag', power: 2.2, biomes: ['swamp', 'tundra'], tame: false },
+  { key: 'hydra', horde: 'A two-headed hydra', the: 'the two-headed hydra', power: 2.4, biomes: ['swamp'], tame: false },
+  { key: 'lurker', horde: 'The mire lurker', the: 'the mire lurker', power: 2.6, biomes: ['swamp'], tame: false },
+  { key: 'basilisk', horde: 'A basilisk', the: 'the basilisk', power: 2.6, biomes: ['wasteland', 'mountain'], tame: true },
+  { key: 'pale', horde: 'A pale horror', the: 'the pale horror', power: 2.8, biomes: ['tundra'], tame: false },
+  { key: 'eye', horde: 'An eye horror', the: 'the eye horror', power: 3.2, biomes: ['mountain'], tame: false },
+  { key: 'fire', horde: 'A fire elemental rift', the: 'the fire rift', power: 2.4, biomes: ['wasteland'], tame: false, rift: true },
+  { key: 'ice', horde: 'An ice elemental rift', the: 'the ice rift', power: 2.4, biomes: ['tundra'], tame: false, rift: true },
+  { key: 'earth', horde: 'An earth elemental rift', the: 'the earth rift', power: 2.4, biomes: ['mountain'], tame: false, rift: true },
+  { key: 'storm', horde: 'A storm elemental rift', the: 'the storm rift', power: 2.4, biomes: ['plains'], tame: false, rift: true },
+  { key: 'water', horde: 'A water elemental rift', the: 'the water rift', power: 2.2, biomes: ['swamp'], tame: false, rift: true },
+  { key: 'void', horde: 'A void rift', the: 'the void rift', power: 3.4, biomes: ['wasteland', 'tundra', 'mountain'], tame: false, rift: true },
+  { key: 'dragon', horde: 'The red dragon', the: 'the red dragon', power: 5, biomes: ['mountain'], tame: false },
 ];
+const MON = Object.fromEntries(MONSTERS.map(m => [m.key, m]));
+
 const TRAITS = ['ambitious', 'honorable', 'greedy', 'reckless', 'cautious', 'cruel', 'kind', 'loyal', 'deceitful', 'brave', 'content'];
 const OPPOSITE = { ambitious: 'content', content: 'ambitious', honorable: 'deceitful', deceitful: 'honorable', reckless: 'cautious', cautious: 'reckless', cruel: 'kind', kind: 'cruel' };
 
@@ -119,15 +138,13 @@ export class World {
     // Monster lairs in wild places
     const wild = land.filter(p => ['forest', 'swamp', 'mountain', 'tundra', 'wasteland'].includes(this.grid[p.y][p.x]) && !this.setts.some(s => (s.x - p.x) ** 2 + (s.y - p.y) ** 2 < 9));
     const lairCount = Math.round(target / 6);
+    const peaks = wild.filter(p => this.grid[p.y][p.x] === 'mountain'); if (peaks.length) wild.unshift(this.pick(peaks));
     for (let i = 0; i < lairCount && wild.length; i++) {
-      const p = this.pick(wild);
+      const p = i === 0 ? wild[0] : this.pick(wild);
       const b = this.grid[p.y][p.x];
-      let opts = MONSTERS.filter(m => m.kind !== 'red dragon');
-      if (b === 'swamp') opts = [MONSTERS[2], MONSTERS[0]];
-      if (b === 'tundra') opts = [MONSTERS[4], MONSTERS[0]];
-      if (b === 'mountain') opts = [MONSTERS[3], MONSTERS[4]];
-      const m = i === 0 ? MONSTERS[6] : this.pick(opts);
-      this.lairs.push({ id: this.id(), x: p.x, y: p.y, kind: m.kind, base: m.power, strength: this.ri(10, 30), alive: true });
+      const opts = MONSTERS.filter(m => m.key !== 'dragon' && m.biomes.includes(b));
+      const m = i === 0 ? MON.dragon : this.pick(opts.length ? opts : [MON.wolves]);
+      this.lairs.push({ id: this.id(), x: p.x, y: p.y, key: m.key, base: m.power, strength: this.ri(10, 30), alive: true });
     }
     // Realms: capitals grab nearby settlements
     const nCap = Math.max(3, Math.round(target / 10));
@@ -408,10 +425,10 @@ export class World {
         if (force > 200 && s.pop < 500 && (!r || s.id !== r.capital || r.setts.size === 1) && this.chance(0.5)) {
           s.destroyed = true; s.pop = 0; this.stats.destroyed++;
           if (r) { r.setts.delete(s.id); if (r.setts.size === 0) this.killRealm(r, null); else if (r.capital === s.id) this.moveCapital(r); }
-          this.log(3, 'monster', L.kind === 'red dragon' ? `The red dragon descends on ${s.name} and burns it to the ground. Only ash and bones remain.` : `An outbreak of ${L.kind} pours out of the wilds and destroys ${s.name}. Only ash and bones remain.`, []);
+          const M = MON[L.key]; this.log(3, 'monster', M.key === 'dragon' ? `The red dragon descends on ${s.name} and burns it to the ground. Only ash and bones remain.` : `${M.horde} ${M.rift ? 'tears open beside' : 'pours out of the wilds and falls upon'} ${s.name}, destroying it. Only ruins remain.`, []);
         } else {
           s.pop = Math.round(s.pop * (0.75 + this.r() * 0.15)); s.unrest += 15; s.food -= s.pop * 0.05;
-          this.log(2, 'monster', `${L.kind[0].toUpperCase() + L.kind.slice(1)} ravage the lands around ${s.name}. The survivors beg for a champion.`, []);
+          this.log(2, 'monster', `${MON[L.key].horde} ravages the lands around ${s.name}. The survivors beg for a champion.`, []);
         }
         L.strength *= 0.7;
       }
@@ -423,25 +440,26 @@ export class World {
         const skill = h.stats.mig * 1.4 + h.stats.int * 0.6 + (h.army ? Math.sqrt(h.army.size) : 4) + this.r() * 25;
         const threat = L.strength * L.base * 0.35 + this.r() * 20;
         if (skill > threat) {
-          const mode = h.stats.cha > 12 && this.chance(0.3) ? 'tame' : h.stats.int > 11 && this.chance(0.35) ? 'trap' : 'slay';
+          const M = MON[L.key];
+          const mode = M.tame && h.stats.cha > 12 && this.chance(0.3) ? 'tame' : !M.rift && M.key !== 'dragon' && h.stats.int > 11 && this.chance(0.35) ? 'trap' : 'slay';
           h.fame += Math.round(8 * L.base); this.gainXp(h, 40);
           let title = null;
           if (mode === 'tame') { title = 'Beast Tamer'; if (h.army) h.army.size += Math.round(30 * L.base); }
           else if (mode === 'trap') title = 'Trapper';
           else title = L.base >= 2.8 ? 'Giant Slayer' : 'Monster Slayer';
-          if (L.kind === 'red dragon' && mode === 'slay') title = 'Dragonslayer';
+          if (M.key === 'dragon' && mode === 'slay') title = 'Dragonslayer';
           const got = this.grantDeed(h, title);
           L.alive = mode === 'trap' || mode === 'tame' ? false : false;
-          const verb = mode === 'tame' ? `tames the ${L.kind} and leads them home as beasts of war` : mode === 'trap' ? `captures the ${L.kind} alive in cunning snares` : `slays the ${L.kind}`;
+          const verb = mode === 'tame' ? `tames ${M.the} and leads the beasts home to fight in their army` : mode === 'trap' ? `captures ${M.the} alive in cunning snares` : M.rift ? `fights through the elementals and closes ${M.the}` : `slays ${M.the}`;
           this.log(L.base >= 2.8 ? 3 : 2, 'monster', `${this.fullName(h)} ${verb}.${got ? ` Bards now call them ${title}.` : ''}`, [h.id]);
           // a new lair may form somewhere later
           if (this.chance(0.6)) this.respawnLair(L);
         } else if (this.chance(0.5)) {
-          this.die(h, `killed by ${L.kind}`);
-          this.log(2, 'monster', `${this.fullName(h)} rides out to face the ${L.kind} and does not return.`, [h.id]);
+          this.die(h, `killed by ${MON[L.key].the}`);
+          this.log(2, 'monster', `${this.fullName(h)} rides out to face ${MON[L.key].the} and does not return.`, [h.id]);
         } else {
           h.wounded = 6;
-          this.log(1, 'monster', `${this.fullName(h)} is driven back, badly wounded, by the ${L.kind}.`, [h.id]);
+          this.log(1, 'monster', `${this.fullName(h)} is driven back, badly wounded, by ${MON[L.key].the}.`, [h.id]);
         }
       }
     }
@@ -449,8 +467,9 @@ export class World {
   respawnLair(L) {
     const land = [];
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (['forest', 'swamp', 'mountain', 'tundra', 'wasteland'].includes(this.grid[y][x])) land.push({ x, y });
-    const p = this.pick(land); const m = this.pick(MONSTERS.slice(0, 6));
-    this.lairs.push({ id: this.id(), x: p.x, y: p.y, kind: m.kind, base: m.power, strength: 5, alive: true });
+    const p = this.pick(land); const b = this.grid[p.y][p.x];
+    const opts = MONSTERS.filter(m => m.key !== 'dragon' && m.biomes.includes(b)); const m = this.pick(opts.length ? opts : [MON.wolves]);
+    this.lairs.push({ id: this.id(), x: p.x, y: p.y, key: m.key, base: m.power, strength: 5, alive: true });
   }
 
   // ---------- vagabonds, bandits, mercenaries ----------
@@ -1121,4 +1140,4 @@ export class World {
   famous(n = 40) { return this.living().filter(c => this.age(c) >= 16).sort((a, b) => b.fame + (b.role === 'ruler' ? 30 : 0) - (a.fame + (a.role === 'ruler' ? 30 : 0))).slice(0, n); }
 }
 
-export { TROOP_TIERS, GUARD };
+export { TROOP_TIERS, GUARD, MON };
