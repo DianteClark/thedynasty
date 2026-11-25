@@ -113,3 +113,12 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - Realms catch hidden agents crossing their lands (spymaster and captain help); for you, spotted agents glow red on the map and in your Intrigue card, ready to seize.
 - **Your intrigue (as a ruler):** send spies against enemies (improves your next battle), send agitators to rival towns, smear a rival (unless they are too sharp and earn the name Deaf Ears), or hire an assassin (if they talk, it means war).
 - **As a vagabond:** raid passing caravans for gold, at the cost of the owners' hatred and the name "the Brigand".
+
+## 0.8: dynasty depth
+
+- **Watch duels:** every duel and tournament is recorded; tap ▶ Watch in the Chronicle or your story to see it fought bout by bout with HAS sprites, ending exactly as it happened.
+- **Challenges:** challenge rivals you hold a grudge against, or the holder of Strongest Under Heaven, choosing a stance (aggressive hits harder but is deadlier for both, defensive is weaker but rarely fatal). Rivals challenge you too; refuse, or let three months pass, and you are called craven.
+- **Tournaments** are announced two months ahead; enter any within reach and ride in the lists with blunted blades.
+- **Titles:** grant General, Marshal or Champion to your officers (Marshals and Generals lift morale in battle), or strip a rank (they won't forget).
+- **Heirs take after their parents:** children inherit traits from their mother and father.
+- **Your dynasty:** a family tree on the You tab and your line of succession.

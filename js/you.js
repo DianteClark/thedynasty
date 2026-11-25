@@ -11,6 +11,8 @@ const ORIGINS = [
   { id: 'lord', name: 'Minor lord', blurb: 'You inherit a lordship of a few holdings, with officers, an army and stronger neighbours.' },
   { id: 'heir', name: 'Heir', blurb: 'You are heir to a kingdom and an officer in its army. The throne is yours when the ruler dies, if you live that long.' },
 ];
+let stance = 'balanced';
+export function setStance(v) { stance = v; }
 const form = { origin: 'vagabond', culture: 'aldmark', name: '', female: false, mode: 'ironman', size: 'large', seed: '' };
 
 function unitIcon(f, u, px = 36) { return `<span class="uicon" style="width:${px}px;height:${px}px;background:url(assets/units/${f}.png) 0 -${u * px}px / ${px * 20}px auto no-repeat"></span>`; }
@@ -89,8 +91,8 @@ export function renderYou(view, w) {
     <div class="sub">${succ ? `${esc(w.fullName(succ))} ${sv.ok ? '<span class="tag title">ready</span>' : `<span class="tag war">${esc(sv.why)}</span>`}` : '<span class="tag war">No one. If you die now, your line ends.</span>'}</div>
     ${cands.length ? `<div class="chips" style="margin-top:8px">${cands.map(c => { const v = w.successorValid(p, c.c); return `<button class="chip ${succ && succ.id === c.c.id ? 'on' : ''}" data-y="successor" data-id="${c.c.id}">${esc(c.c.name)} · ${c.why}${v.ok ? '' : ' ⚠'}</button>`; }).join('')}</div>` : '<div class="sub" style="margin-top:6px">Marry, have children, swear an oath or gather companions to have someone to pass your story to.</div>'}
   </div>`;
-  html += `<h2 class="sec">What will you do?</h2>` + actions(w, p, r, rules);
-  html += `<h2 class="sec">Your story</h2>${story.map(e => `<div class="entry i${e.importance}"><div class="meta">Year ${e.y}</div>${esc(e.text)}</div>`).join('') || '<div class="sub">Your story is only beginning.</div>'}`;
+  html += `<h2 class="sec">What will you do?</h2>` + honour(w, p) + actions(w, p, r, rules) + dynasty(w, p);
+  html += `<h2 class="sec">Your story</h2>${story.map(e => `<div class="entry i${e.importance}"><div class="meta">Year ${e.y}</div>${esc(e.text)}${e.duels ? `<div class="who"><button class="pill" data-watch-duel="${w.chronicle.indexOf(e)}">▶ Watch ${e.duels.length > 1 ? `the ${e.duels.length} bouts` : 'the duel'}</button></div>` : ''}</div>`).join('') || '<div class="sub">Your story is only beginning.</div>'}`;
   view.innerHTML = html;
 }
 
@@ -189,7 +191,7 @@ function armies(w, r) {
   if (!offs.length) return '';
   const used = r.leviedYear === w.year ? r.levied || 0 : 0; const left = Math.max(0, w.levyCap(r) - used);
   return `<div class="card"><h3>🛡 Armies</h3><div class="sub">Levies left this year: ${left} (2 troops per gold). Swapping armies gives your best troops to your best officer.</div>
-    ${offs.map(o => `<div class="arow"><div><b>${esc(o.name)}</b>${o.titles.rank ? ` <span class="tag title">${esc(o.titles.rank)}</span>` : ''}<div class="sub">${o.army.size} ${esc(w.plural(w.unitName(o.army)))} · ${w.troopTier(o.army)} · Lead ${o.stats.lea}</div></div><div class="abtns">${btn('+50', { type: 'levy', id: o.id, n: 50 })}</div></div>
+    ${offs.map(o => `<div class="arow"><div><b>${esc(o.name)}</b>${o.titles.rank ? ` <span class="tag title">${esc(o.titles.rank)}</span>` : ''}${o.id !== r.rulerId ? `<span class="chips inline">${['General', 'Marshal', 'Champion'].filter(t => t !== o.titles.rank).map(t => `<button class="chip mini" data-act='${esc(JSON.stringify({ type: 'grant', id: o.id, title: t }))}'>+${t}</button>`).join('')}${o.titles.rank ? `<button class="chip mini" data-act='${esc(JSON.stringify({ type: 'revoke', id: o.id }))}' data-confirm="Strip ${esc(o.name)} of their rank?">Revoke</button>` : ''}</span>` : ''}<div class="sub">${o.army.size} ${esc(w.plural(w.unitName(o.army)))} · ${w.troopTier(o.army)} · Lead ${o.stats.lea}</div></div><div class="abtns">${btn('+50', { type: 'levy', id: o.id, n: 50 })}</div></div>
       ${offs.length > 1 ? `<div class="chips">${offs.filter(x => x.id !== o.id).slice(0, 4).map(x => `<button class="chip" data-act='${esc(JSON.stringify({ type: 'transfer', from: o.id, to: x.id }))}'>Swap with ${esc(x.name)}</button>`).join('')}</div>` : ''}`).join('')}</div>`;
 }
 function family(w, p, r) {
@@ -218,4 +220,33 @@ function intrigue(w, p, r) {
     ${towns.length ? `<div class="sub" style="margin-top:8px">Send agitators to a rival town (40 gold). They stir unrest for months:</div><div class="abtns">${towns.map(s => btn(`${esc(s.name)} (unrest ${Math.round(s.unrest)})`, { type: 'agitate', sett: s.id })).join('')}</div>` : ''}
     ${targets.length ? `<div class="sub" style="margin-top:8px">Spread lies about a rival (30 gold), or hire an assassin (150 gold, and if they talk, it means war):</div>
       ${targets.map(c => `<div class="abtns">${btn(`Smear ${esc(c.name)}`, { type: 'smear', id: c.id })}${btn(`Assassinate ${esc(c.name)}`, { type: 'assassin', id: c.id }, `data-confirm="Send an assassin after ${esc(c.name)}?"`)}</div>`).join('')}` : ''}</div>`;
+}
+
+function stanceChips() {
+  return `<div class="chips">${[['aggressive', 'Aggressive: hits harder, deadlier for both'], ['balanced', 'Balanced'], ['defensive', 'Defensive: weaker, but rarely fatal']].map(([k, l]) => `<button class="chip ${stance === k ? 'on' : ''}" data-stance="${k}">${l}</button>`).join('')}</div>`;
+}
+function honour(w, p) {
+  let h = '';
+  if (p.challenge) {
+    const from = w.char(p.challenge.from);
+    h += `<div class="card danger"><h3>⚔ You have been challenged</h3><div class="sub">${esc(from ? w.fullName(from) : 'Someone')} (Might ${from?.stats.mig}) challenges you over ${esc(p.challenge.reason)}. Refusing marks you craven. Your Might is ${p.stats.mig}${p.wounded ? ', and you are wounded' : ''}.</div>
+      ${stanceChips()}<div class="abtns">${btn('Accept the duel', { type: 'answer', accept: true, stance })}${btn('Refuse', { type: 'answer', accept: false })}</div></div>`;
+  }
+  const tourneys = w.realmList().filter(r => r.tourney && w.sett(r.capital) && (w.dist(w.sett(r.capital), p) < 15 || r.id === p.realmId));
+  if (tourneys.length) h += `<div class="card"><h3>🏇 Tournaments</h3><div class="sub">Fought with blunted blades in Highsun. Glory, marriage offers and titles for the champion.</div><div class="abtns">${tourneys.map(r => p.enterTourney === r.id ? `<span class="tag title">Entered at ${esc(w.sett(r.capital).name)}</span>` : btn(`Enter at ${esc(w.sett(r.capital).name)}`, { type: 'enter', realm: r.id })).join('')}</div></div>`;
+  const targets = w.challengeTargets();
+  if (targets.length && !p.prisonerOf) h += `<div class="card"><h3>🤺 Challenge to a duel</h3><div class="sub">Real blades. Your Might ${p.stats.mig}. Losing can mean wounds or death.</div>${stanceChips()}
+    ${targets.map(x => `<div class="arow"><div><b>${esc(w.fullName(x.c))}</b><div class="sub">Might ${x.c.stats.mig} · over ${esc(x.reason)}</div></div>${btn('Challenge', { type: 'challenge', id: x.c.id, stance }, `data-confirm="Duel ${esc(x.c.name)} with real blades?"`)}</div>`).join('')}</div>`;
+  return h;
+}
+function dynasty(w, p) {
+  const line = (w.line || []).map(id => w.char(id)).filter(Boolean);
+  const kids = c => c.children.map(id => w.char(id)).filter(Boolean);
+  const pill = c => `<button class="pill ${c.alive ? '' : 'dead'}" data-char="${c.id}">${esc(c.name)}${c.id === p.id ? ' (you)' : ''}${c.alive ? ` · ${w.age(c)}` : ''}</button>`;
+  const tree = (c, depth) => depth > 2 ? '' : `<div class="tree">${pill(c)}${c.spouseId && w.char(c.spouseId) ? ` <span class="sub">⚭</span> ${pill(w.char(c.spouseId))}` : ''}${kids(c).length ? `<div class="branch">${kids(c).map(k => tree(k, depth + 1)).join('')}</div>` : ''}</div>`;
+  const parents = p.parents.map(id => w.char(id)).filter(Boolean);
+  return `<div class="card"><h3>🌳 Your dynasty</h3>
+    ${line.length > 1 ? `<div class="sub">Your line: ${line.map(c => esc(c.name)).join(' → ')}</div>` : ''}
+    ${parents.length ? `<div class="sub" style="margin-top:6px">Parents: ${parents.map(pill).join(' ')}</div>` : ''}
+    <div style="margin-top:8px">${tree(p, 0)}</div></div>`;
 }

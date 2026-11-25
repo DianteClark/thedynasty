@@ -2,7 +2,8 @@ import { World, SIZES, TROOP_TIERS } from './sim.js';
 import { cultureById } from './names.js';
 import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle } from './battleview.js';
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
-import { renderYou, renderCreation, readForm, handleFormClick } from './you.js';
+import { renderYou, renderCreation, readForm, handleFormClick, setStance } from './you.js';
+import { watchDuels } from './duelview.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -167,7 +168,7 @@ function renderChronicle() {
   let lastY = null;
   for (const e of entries) {
     if (e.y !== lastY) { html += `<div class="year">Year ${e.y}</div>`; lastY = e.y; }
-    const people = e.ids.slice(0, 4).map(id => charPill(world.char(id))).join('');
+    const people = e.ids.slice(0, 4).map(id => charPill(world.char(id))).join('') + (e.duels ? `<button class="pill" data-watch-duel="${world.chronicle.indexOf(e)}">▶ Watch</button>` : '');
     html += `<div class="entry i${e.importance} ${e.type === 'you' || (world.playerId && e.ids.includes(world.playerId)) ? 'you' : ''}"><div class="meta">${e.watched ? '👁 Watched · ' : ''}${TYPE_LABELS[e.type] || 'The world'} · ${['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'][e.m]}</div>${esc(e.text)}${people ? `<div class="who">${people}</div>` : ''}</div>`;
   }
   if (total > ui.shown) html += `<button class="more" id="moreBtn">Show older (${total - ui.shown} more)</button>`;
@@ -400,6 +401,8 @@ document.addEventListener('click', ev => {
   if (t.dataset.y === 'newlife') { if (world.gameOver && !creatingLife) { creatingLife = true; return render(); } const f = readForm(); creatingLife = false; const msg = world.act({ type: 'start', origin: f.origin, culture: f.culture, name: f.name, female: f.female, mode: f.mode }); save(); render(); return toast(msg); }
   if (t.dataset.y === 'newworld') { world = null; creatingLife = false; tab = 'you'; selectTab(); return render(); }
   if (t.dataset.y === 'successor') return doAct({ type: 'successor', id: +t.dataset.id });
+  if (t.dataset.stance) { setStance(t.dataset.stance); return render(); }
+  if (t.dataset.watchDuel) { const e = world.chronicle[+t.dataset.watchDuel]; return watchDuels(e.duels, e.duels.length > 1 ? 'The tournament' : 'A duel'); }
   if (t.dataset.act) { const a = JSON.parse(t.dataset.act); if (t.dataset.confirm && !window.confirm(t.dataset.confirm)) return; return doAct(a); }
   if (t.dataset.tab) { if (tab === 'map' && t.dataset.tab !== 'map') unmountMap(); tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
@@ -418,7 +421,9 @@ $('#btnTen').onclick = () => ready() && runMonths(120);
 $('#btnHundred').onclick = () => ready() && runMonths(1200);
 $('#btnWorld').onclick = () => !busy && world && worldSheet();
 function doAct(a) {
+  world.lastPlayerDuel = null;
   const msg = world.act(a); save(); render(tab === 'map'); if (tab === 'map') refreshCard(); if (msg) toast(msg);
+  if (world.lastPlayerDuel && (a.type === 'challenge' || a.type === 'answer')) watchDuels([world.lastPlayerDuel], 'Your duel');
 }
 
 // ---------- start ----------

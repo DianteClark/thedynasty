@@ -299,6 +299,7 @@ export class World {
   // ---------- chronicle ----------
   log(importance, type, text, ids) {
     const e = { y: this.year, m: this.month, importance, type, text, ids };
+    if (this.recentDuels && this.recentDuels.length) { e.duels = this.recentDuels; this.recentDuels = []; }
     this.chronicle.push(e);
     for (const id of ids) { const c = this.char(id); if (c) c.log.push(this.chronicle.length - 1); }
   }
@@ -317,6 +318,7 @@ export class World {
     this.agentsTick();
     this.playerTick();
     this.monthlyLife();
+    if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
     if (this.pendingBattle && this.pendingBattle.replay) {
@@ -763,6 +765,7 @@ export class World {
       morale += (war.intel[realm.id] || 0) * 40;
       if (duelSide === idx) morale += 10;
       if (idx === 1 && target.biome === 'mountain') morale += 8;
+      if (offs.some(o => o.titles.rank === 'Marshal')) morale += 5; else if (offs.some(o => o.titles.rank === 'General')) morale += 3;
       const lead = offs[0] || this.char(realm.rulerId);
       return { faction: target.culture, name: realm.name, realmId: realm.id, color: realm.color, ai: this.generalStyle(lead), canFire: offs.some(o => o.stats.int >= 12), mods: { morale, atk: famine(realm) ? 0.92 : 1 }, divisions };
     };
@@ -886,17 +889,23 @@ export class World {
   }
 
   // ---------- duels ----------
-  duel(a, b, reason, training) {
+  duel(a, b, reason, training, opts = {}) {
     this.stats.duels++;
-    const sa = a.stats.mig * 2 + a.level + this.r() * 15 - (a.wounded ? 6 : 0);
-    const sb = b.stats.mig * 2 + b.level + this.r() * 15 - (b.wounded ? 6 : 0);
+    const st = c => (this.isPlayer(c) ? opts.stance : null) || 'balanced';
+    const bonus = c => st(c) === 'aggressive' ? 4 : st(c) === 'defensive' ? -3 : 0;
+    const sa = a.stats.mig * 2 + a.level + this.r() * 15 - (a.wounded ? 6 : 0) + bonus(a);
+    const sb = b.stats.mig * 2 + b.level + this.r() * 15 - (b.wounded ? 6 : 0) + bonus(b);
     const [w, l] = sa >= sb ? [a, b] : [b, a];
     w.duelWins++; w.fame += training ? 3 : 5; this.gainXp(w, 20);
     this.opine(l, w, -25);
+    const rec = { a: a.id, b: b.id, w: w.id, an: a.name, bn: b.name, af: this.fighter(a), bf: this.fighter(b), outcome: training ? 'yield' : 'yield', training: !!training, reason, margin: Math.abs(sa - sb), seed: Math.floor(this.r() * 1e6) };
+    (this.recentDuels || (this.recentDuels = [])).push(rec);
+    if (this.isPlayer(a) || this.isPlayer(b)) this.lastPlayerDuel = rec;
     if (!training) {
       const roll = this.r();
-      if (roll < 0.1) { this.die(l, `slain in a duel by ${w.name}`); }
-      else if (roll < 0.35) l.wounded = 8;
+      const lethal = st(l) === 'defensive' ? 0.4 : st(w) === 'aggressive' || st(l) === 'aggressive' ? 1.6 : 1;
+      if (roll < 0.1 * lethal) { rec.outcome = 'slain'; this.die(l, `slain in a duel by ${w.name}`); }
+      else if (roll < 0.35) { rec.outcome = 'wounded'; l.wounded = 8; }
       if (w.duelWins >= 5 && !w.titles.deed) this.grantDeed(w, 'Undefeated');
     }
     // unique title: Strongest Under Heaven
@@ -907,6 +916,15 @@ export class World {
       this.log(3, 'duel', `${this.fullName(w)} defeats ${l.name} and claims the title Strongest Under Heaven.`, [w.id, l.id]);
     }
     return w;
+  }
+
+  fighter(c) {
+    // duelists fight on foot: the culture's warrior, or its first upgraded warrior for the famous
+    const us = UNITS[c.culture]; let i = us.findIndex(u => u.entry && (u.role === 'inf' || u.role === 'heavy'));
+    if (i < 0) i = us.findIndex(u => u.role === 'inf' || u.role === 'heavy' || u.role === 'magic');
+    if (i < 0) i = 0;
+    if ((c.fame > 30 || c.duelWins >= 3) && us[i].up != null) i = us[i].up;
+    return [c.culture, i];
   }
 
   // ---------- intrigue: spies, assassins, rumors ----------
@@ -990,7 +1008,7 @@ export class World {
   spreadRumor(c, kind, n) {
     c.rumors[kind] = (c.rumors[kind] || 0) + n;
     if (n >= 2 && (this.agents || []).filter(a => a.kind === 'rumor').length < 12) { const from = this.sett(c.settId) || this.sett(this.realm(c.realmId)?.capital); const to = from && this.pick(this.setts.filter(s => !s.destroyed && this.dist(s, from) < 9 && s !== from)); if (from && to) this.spawnAgent('rumor', c.realmId, from, to, { about: c.id, text: kind, culture: c.culture }); }
-    const map = { butcher: 'the Butcher', merciful: 'the Merciful', oathbreaker: 'the Oathbreaker', traitor: 'the Traitor', kinslayer: 'the Kinslayer', brigand: 'the Brigand' };
+    const map = { butcher: 'the Butcher', merciful: 'the Merciful', oathbreaker: 'the Oathbreaker', traitor: 'the Traitor', kinslayer: 'the Kinslayer', brigand: 'the Brigand', craven: 'the Craven' };
     const title = map[kind];
     if (c.rumors[kind] >= 4 && c.titles.rep !== title && c.titles.rep !== 'Deaf Ears') {
       c.titles.rep = title;
@@ -999,14 +1017,27 @@ export class World {
   }
 
   // ---------- tournaments ----------
-  tournaments() {
+  planTournaments() {
+    // heralds announce tournaments two months ahead
     for (const r of this.realmList()) {
       const asked = r.hostTournament; r.hostTournament = false;
       if (this.isPlayer(this.char(r.rulerId)) && !asked) continue;
       if (!asked && (r.tier === 'Village' || r.treasury < 150 || this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id)) || !this.chance(0.15))) continue;
-      const cap = this.sett(r.capital);
-      const pool = this.living().filter(c => this.age(c) >= 17 && this.age(c) <= 50 && !c.prisonerOf && !c.wounded && ['officer', 'ruler', 'vagabond', 'courtier', 'merc'].includes(c.role) && this.dist(c, cap) < 15);
-      const entrants = this.shuffle(pool).slice(0, 8);
+      r.tourney = true;
+      const cap = this.sett(r.capital), p = this.player;
+      if (p && p.alive && !p.prisonerOf && cap && (this.dist(p, cap) < 15 || this.isPlayer(this.char(r.rulerId)))) this.you(`Heralds announce a tournament at ${cap.name} in Highsun. Enter it from the You tab.`, [], 1);
+    }
+  }
+  act_enter(a) { const r = this.realm(a.realm); if (!r || !r.tourney) return 'There is no tournament there.'; this.player.enterTourney = r.id; return `You will ride in the lists at ${this.sett(r.capital)?.name}.`; }
+  tournaments() {
+    for (const r of this.realmList()) {
+      if (!r.tourney) continue; r.tourney = false;
+      const cap = this.sett(r.capital); if (!cap) continue;
+      const p = this.player;
+      const pool = this.living().filter(c => !this.isPlayer(c) && this.age(c) >= 17 && this.age(c) <= 50 && !c.prisonerOf && !c.wounded && ['officer', 'ruler', 'vagabond', 'courtier', 'merc'].includes(c.role) && this.dist(c, cap) < 15);
+      let entrants = this.shuffle(pool).slice(0, 8);
+      if (p && p.alive && p.enterTourney === r.id && !p.prisonerOf) { entrants = [p, ...entrants.slice(0, 7)]; this.shuffle(entrants); }
+      if (p) p.enterTourney = null;
       if (entrants.length < 4) continue;
       r.treasury -= 60; this.stats.tournaments++;
       let round = entrants;
@@ -1055,6 +1086,10 @@ export class World {
           const k = this.makeChar({ culture: this.chance(0.5) ? c.culture : sp.culture, age: 0, role: 'child', dynasty: dyn || c.dynasty, noble: c.noble || sp.noble });
           this.setParents(k, sp.role === 'ruler' ? sp : c, sp.role === 'ruler' ? c : sp);
           if (c.culture !== sp.culture) k.mixed = [c.culture, sp.culture];
+          // children take after their parents
+          const inherit = [];
+          for (const par of [c, sp]) if (this.chance(0.5)) { const t = this.pick(par.traits); if (!inherit.includes(t) && !inherit.includes(OPPOSITE[t])) inherit.push(t); }
+          if (inherit.length) { k.traits = [...inherit, ...k.traits.filter(t => !inherit.includes(t) && !inherit.includes(OPPOSITE[t]))].slice(0, 2); }
           // inherit some stats
           for (const s of Object.keys(k.stats)) k.stats[s] = Math.round((k.stats[s] + (c.stats[s] + sp.stats[s]) / 2) / 2 + this.ri(-1, 2));
           this.stats.births++;
@@ -1436,6 +1471,8 @@ export class World {
       }
     }
     for (const x of this.living()) if (x.companionOf === p.id) { x.x = p.x; x.y = p.y; x.settId = p.settId; if (p.realmId && x.realmId !== p.realmId && p.role !== 'vagabond') { x.realmId = p.realmId; if (x.role === 'vagabond') this.addOfficer(this.realm(p.realmId), x); } }
+    if (p.challenge && this.monthIndex >= p.challenge.due) { this.act_answer({ accept: false }); }
+    if (this.month === 9) this.challengesForPlayer();
     // companions grow closer on the road
     for (const x of this.living()) if (x.companionOf === p.id && this.chance(0.5)) this.opine(x, p, 1);
     // plots against you (most arrive as assassins on the map; a few strike from within)
@@ -1973,6 +2010,68 @@ export class World {
     if (this.chance(odds)) { const g = ag.data.value * 2; p.gold = (p.gold || 0) + g; p.fame += 2; this.you(`You fall on a caravan of ${owner?.name || 'merchants'} and carry off ${g} gold.`, [], 2); return `${g} gold!`; }
     const lost = Math.round((p.followers || 0) * 0.3); p.followers = Math.max(0, (p.followers || 0) - lost); p.wounded = 4;
     this.you(`The caravan guards drive you off. ${lost} of your followers fall.`, [], 2); return 'The raid fails.';
+  }
+
+  // ---------- 0.8 honour: challenges and titles ----------
+  challengeTargets() {
+    const p = this.player; if (!p) return [];
+    const out = [];
+    const holder = this.char(this.unique.strongest);
+    if (holder && holder.alive && !this.isPlayer(holder) && !holder.prisonerOf) out.push({ c: holder, reason: 'the title Strongest Under Heaven' });
+    for (const c of this.living()) if (!this.isPlayer(c) && !c.prisonerOf && this.age(c) >= 17 && this.age(c) <= 60 && (this.op(p, c) <= -30 || this.op(c, p) <= -40) && !out.some(x => x.c === c)) out.push({ c, reason: 'an old grudge' });
+    return out.slice(0, 6);
+  }
+  duelOutcomeText(rec, you) {
+    const w = this.char(rec.w), l = this.char(rec.w === rec.a ? rec.b : rec.a);
+    const won = this.isPlayer(w);
+    const fate = rec.outcome === 'slain' ? (won ? `${l.name} falls dead` : 'you fall') : rec.outcome === 'wounded' ? (won ? `${l.name} is badly wounded` : 'you are badly wounded') : (won ? `${l.name} yields` : 'you yield');
+    return `${you} ${won ? 'You win' : `${w.name} wins`}: ${fate}.`;
+  }
+  act_challenge(a) {
+    const p = this.player, t = this.char(a.id); if (!t || !t.alive) return 'They are gone.';
+    if (p.wounded) return 'You are too badly hurt to fight.';
+    const forTitle = t.id === this.unique.strongest;
+    const accept = forTitle ? 0.85 : 0.55 + (this.has(t, 'brave') || this.has(t, 'reckless') ? 0.3 : 0) - (this.has(t, 'cautious') ? 0.25 : 0) + (t.stats.mig - p.stats.mig) * 0.03;
+    if (!this.chance(Math.max(0.1, Math.min(0.95, accept)))) {
+      this.spreadRumor(t, 'craven', 2); p.fame += 3;
+      this.you(`You challenge ${this.fullName(t)} to a duel over ${forTitle ? 'the title Strongest Under Heaven' : 'an old grudge'}. They refuse, and men begin to call them craven.`, [t.id], 2);
+      return `${t.name} refuses to fight you.`;
+    }
+    const rec = this.duel(p, t, forTitle ? 'title' : 'grudge', false, { stance: a.stance });
+    this.you(this.duelOutcomeText(this.lastPlayerDuel, `You face ${this.fullName(t)} in a duel over ${forTitle ? 'the title Strongest Under Heaven' : 'an old grudge'}.`), [t.id], 3);
+    return 'The duel is fought.';
+  }
+  act_answer(a) {
+    const p = this.player, ch = p.challenge; if (!ch) return 'No one has challenged you.';
+    p.challenge = null; const from = this.char(ch.from); if (!from || !from.alive) return 'Your challenger is gone.';
+    if (!a.accept) { this.spreadRumor(p, 'craven', 2); p.fame = Math.max(0, p.fame - 5); this.you(`You refuse ${this.fullName(from)}'s challenge. Your honour suffers.`, [from.id], 2); return 'You refuse the challenge.'; }
+    this.duel(from, p, 'grudge', false, { stance: a.stance });
+    this.you(this.duelOutcomeText(this.lastPlayerDuel, `You answer ${this.fullName(from)}'s challenge.`), [from.id], 3);
+    return 'The duel is fought.';
+  }
+  challengesForPlayer() {
+    const p = this.player; if (!p || !p.alive || p.challenge || p.prisonerOf) return;
+    const foe = this.living().find(c => !this.isPlayer(c) && !c.prisonerOf && !c.wounded && this.op(c, p) < -55 && c.stats.mig >= 9 && this.age(c) <= 55 && (this.has(c, 'brave') || this.has(c, 'reckless') || this.has(c, 'ambitious')));
+    const holderIsYou = this.isPlayer(this.char(this.unique.strongest));
+    const rival = holderIsYou ? this.living().filter(c => !this.isPlayer(c) && !c.prisonerOf && !c.wounded && c.duelWins >= 3 && this.age(c) <= 50).sort((x, y) => y.stats.mig - x.stats.mig)[0] : null;
+    const who = foe && this.chance(0.25) ? foe : rival && this.chance(0.35) ? rival : null;
+    if (!who) return;
+    p.challenge = { from: who.id, reason: who === rival ? 'your title' : 'an old grudge', due: this.monthIndex + 3 };
+    this.you(`${this.fullName(who)} challenges you to a duel over ${p.challenge.reason}. Answer from the You tab within three months, or be called craven.`, [who.id], 3);
+  }
+  act_grant(a) {
+    const r = this.playerRealm(), c = this.char(a.id); if (!c || c.realmId !== r.id) return 'They do not serve you.';
+    if (!['General', 'Marshal', 'Champion'].includes(a.title)) return;
+    if (a.title === 'Marshal') for (const o of this.realmOfficers(r)) if (o.titles.rank === 'Marshal') o.titles.rank = null;
+    for (const k of ['stewardId', 'captainId', 'spymasterId']) if (r[k] === c.id) r[k] = null;
+    c.titles.rank = a.title; c.loyalty = Math.min(100, (c.loyalty || 60) + 15); this.opine(c, this.player, 15);
+    this.you(`You name ${this.fullName(c)} ${a.title}.`, [c.id], 1); return `${c.name} is your ${a.title}.`;
+  }
+  act_revoke(a) {
+    const r = this.playerRealm(), c = this.char(a.id); if (!c || !c.titles.rank) return 'They hold no rank.';
+    const old = c.titles.rank; c.titles.rank = null; for (const k of ['stewardId', 'captainId', 'spymasterId']) if (r[k] === c.id) r[k] = null;
+    c.loyalty = Math.max(0, (c.loyalty || 60) - 25); this.opine(c, this.player, -30);
+    this.you(`You strip ${this.fullName(c)} of the rank of ${old}. They will not forget it.`, [c.id], 2); return `${c.name} is ${old} no more.`;
   }
 
   // ---------- views ----------
