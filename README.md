@@ -34,3 +34,17 @@ Worlds are deterministic: the same seed and size always produce the same world. 
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen app support (works offline)
 
 Art style reference: HAS pixel art by Aleksandr Makarov (credit will be given when sprites are added).
+
+## Prototype 0.2: the battle map
+
+The **Battle** tab sets up a battle on a map built from the HAS overworld tiles:
+
+- Six factions with HAS Creature Pack sprites (idle, walk, attack, hit and death animations)
+- Three divisions per side, each led by an officer with Leadership, Might, Intellect and Charisma
+- Orders (hold, advance, charge, flank left or right, fall back) ride out by messenger, and higher Leadership gets them there faster
+- Morale decides battles: flank and rear attacks, fire, fallen officers and nearby routs all shake troops; broken divisions flee, and officers with high Charisma can rally them
+- One stratagem: a volley of fire arrows that hits friend and foe alike
+- An enemy general with a reckless, balanced or cautious personality
+- Pan, pinch to zoom, overview toggle, minimap, and pause / 1× / 2× / 4× speed
+
+Sprite atlases are built from the original HAS frames by `tools/build_assets.py`.

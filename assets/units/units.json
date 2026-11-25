@@ -1,0 +1,56 @@
+{
+ "aldmark": [
+  "Pikeman",
+  "Archer",
+  "Swordsman",
+  "Griffin",
+  "Monk",
+  "Cavalier",
+  "Paladin"
+ ],
+ "ashborn": [
+  "Imp",
+  "Gog",
+  "Hell Hound",
+  "Demon",
+  "Pit Fiend",
+  "Efreet",
+  "Devil"
+ ],
+ "undying": [
+  "Skeleton",
+  "Zombie",
+  "Ghost",
+  "Spider",
+  "Vampire",
+  "Lich",
+  "Black Knight"
+ ],
+ "sylvan": [
+  "Pixie",
+  "Dwarf",
+  "Hunter",
+  "Satyr",
+  "Deer",
+  "Druid",
+  "Treant"
+ ],
+ "kharn": [
+  "Goblin",
+  "Wolf Rider",
+  "Harpy",
+  "Shaman",
+  "Centaur",
+  "Troll",
+  "Cyclops"
+ ],
+ "azure": [
+  "Gremlin",
+  "Gargoyle",
+  "Golem",
+  "Mage",
+  "Naga",
+  "Djinn",
+  "Titan"
+ ]
+}

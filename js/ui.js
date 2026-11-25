@@ -1,5 +1,6 @@
 import { World, SIZES, TROOP_TIERS } from './sim.js';
 import { cultureById } from './names.js';
+import { renderBattleSetup, handleBattleSetupClick } from './battleview.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
@@ -85,6 +86,7 @@ function render(soft = false) {
   else if (tab === 'realms') renderRealms();
   else if (tab === 'people') renderPeople();
   else if (tab === 'stats') renderStats();
+  else if (tab === 'battle' && !soft) renderBattleSetup(view);
 }
 
 function renderChronicle() {
@@ -318,8 +320,10 @@ function worldSheet() {
 
 // ---------- events ----------
 document.addEventListener('click', ev => {
+  if (ev.target.closest('.battle')) return;
   const t = ev.target.closest('button, .card.tap, [data-char], [data-realm]');
   if (!t) return;
+  if (tab === 'battle' && !t.dataset.tab && handleBattleSetupClick(t, view)) return;
   if (t.matches('[data-close]')) return closeSheet();
   if (t.dataset.tab) { tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
