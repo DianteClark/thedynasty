@@ -18,6 +18,23 @@ export const ORDERS = {
   hold: 'Hold position', advance: 'Advance', charge: 'Charge', flankL: 'Flank left', flankR: 'Flank right', retreat: 'Fall back',
 };
 
+export const RESERVE_ORDERS = { defend: 'Defend our bases', push: 'Push on their bases', follow: 'Reinforce an officer' };
+// 2.4 base layouts: rows from the front line back to the main camp (the middle of the last row)
+export const BASE_LAYOUTS = { plains: ['2-2-1', '3-2', '2-3'], forest: ['2-1', '2-1-1'], swamp: ['2-1-1', '1-2-1'], wasteland: ['1-3-1', '3-2'], tundra: ['2-1', '1-2-1'], mountain: ['1-1-1', '2-1'] };
+export const BASE_CAPS = { main: 5000, fort: 2500, outpost: 1000 };
+export function layoutBases(pattern, side) {
+  const rows = pattern.split('-').map(Number); const out = [];
+  rows.forEach((n, ri) => {
+    const fx = 0.34 - ri * (0.26 / Math.max(1, rows.length - 1));
+    for (let k = 0; k < n; k++) {
+      const main = ri === rows.length - 1 && k === Math.floor((n - 1) / 2);
+      out.push({ side, kind: main ? 'main' : ri === 0 ? 'outpost' : 'fort', fx: side === 0 ? fx : 1 - fx, fy: (k + 1) / (n + 1) });
+    }
+  });
+  return out;
+}
+export function fieldFor(total) { const k = Math.max(1, Math.sqrt(total / 2400)); return { w: Math.round(1600 * k), h: Math.round(1000 * k) }; }
+
 function mulberry(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 export class Battle {
@@ -34,50 +51,96 @@ export class Battle {
     this.soldiers = []; this.divisions = []; this.projectiles = []; this.messengers = []; this.fires = []; this.corpses = [];
     this.cell = 32; this.gw = Math.ceil(this.fw / this.cell); this.gh = Math.ceil(this.fh / this.cell);
     this.season = cfg.season || 'Summer';
-    this.sides = cfg.sides.map((s, i) => ({ ...s, index: i, dir: i === 0 ? 1 : -1, fireUsed: s.canFire === false, hq: { x: i === 0 ? 40 : this.fw - 40, y: this.fh / 2 } }));
+    this.sides = cfg.sides.map((s, i) => ({ ...s, divisions: s.divisions.slice(), index: i, dir: i === 0 ? 1 : -1, fireUsed: s.canFire === false, hq: { x: i === 0 ? 40 : this.fw - 40, y: this.fh / 2 } }));
     this.trees = [];
     const nTrees = { forest: 70, plains: 8, swamp: 22, wasteland: 6, tundra: 14, mountain: 18 }[this.terrain] || 8;
     for (let i = 0; i < nTrees; i++) this.trees.push({ x: 260 + this.r() * (this.fw - 520), y: 60 + this.r() * (this.fh - 120), alt: this.r() < 0.35 });
     const total = cfg.sides.reduce((a, sd) => a + sd.divisions.reduce((x, d) => x + d.count, 0), 0);
     this.inset = total < 250 ? 360 : 0; // small fights start closer together
-    for (const side of this.sides) {
-      const n = side.divisions.length;
-      side.divisions.forEach((d, k) => {
-        const faction = d.faction || side.faction;
-        const def = UNITS[faction][d.unit];
-        const role = def.role;
-        const R = ROLE[role];
-        const tier = this.unitTier(faction, d.unit);
-        const lvl = 1 + 0.06 * ((d.level || 1) - 1);
-        const mods = side.mods || {};
-        const mult = (1 + 0.22 * tier) * lvl;
-        const y0 = this.fh * (k + 1) / (n + 1);
-        const back = role === 'ranged' || role === 'magic' ? 60 : 0;
-        const gar = d.garrison || null;
-        const x0 = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
-        const x = gar ? gar.x : x0, y = gar ? gar.y : y0;
-        const div = {
-          id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
-          stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
-          level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: !gar, captured: false },
-          garrison: gar ? { x, y, leash: gar.leash || 380, quiet: 0 } : null, dormant: !!gar, base: gar ? gar.base : null,
-          cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5 + (mods.morale || 0),
-          start: d.count, dead: 0, fled: 0, routed: false, rallied: 0, flankPhase: 0, chargeT: 0, lastHit: -9, inCombat: false, contactT: 0, color: side.color,
-        };
-        div.morale = div.baseMorale;
-        const cols = gar ? Math.max(6, Math.round(Math.sqrt(d.count))) : Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
-        div.cols = cols; div.spacing = gar ? 10 : role === 'cav' || role === 'heavy' ? 15 : 12;
-        div.soldiers = [];
-        for (let i = 0; i < d.count; i++) {
-          const s = { div, side: side.index, slot: i, x: 0, y: 0, hp: div.stats.hp, cd: this.r() * R.cd, target: null, anim: 0, at: this.r() * 4, dying: 0, alive: true, fled: false, vx: 0, vy: 0 };
-          const p = this.slotPos(div, i); s.x = p.x + (this.r() - 0.5) * 4; s.y = p.y + (this.r() - 0.5) * 4;
-          div.soldiers.push(s); this.soldiers.push(s);
-        }
-        this.divisions.push(div);
-      });
+    // 2.4 bases: each side's posts and main camp, garrisoned by unled troops who sleep until enemies come near
+    this.bases = [];
+    for (const bs of cfg.bases || []) {
+      const side = this.sides[bs.side];
+      const x = bs.fx * this.fw, y = bs.fy * this.fh;
+      this.bases.push({ id: this.bases.length, side: bs.side, home: bs.side, kind: bs.kind, faction: bs.faction || side.faction, name: bs.name || (bs.kind === 'main' ? 'the main camp' : bs.kind), x, y, r: Math.max(70, Math.sqrt(bs.count) * 5 + 34), start: bs.count, div: null, fired: 0 });
+      side.divisions.push({ faction: bs.faction || side.faction, unit: bs.unit || 0, count: Math.max(1, bs.count), level: bs.level || 2, garrison: { x, y, base: this.bases.length - 1 }, officer: { name: bs.kind === 'main' ? 'Camp guard' : 'Garrison', stats: { lea: 8, mig: 6, int: 6, cha: 9 } } });
     }
+    for (const side of this.sides) if (side.reserve && side.reserve.count > 0) {
+      const main = this.bases.find(b => b.side === side.index && b.kind === 'main');
+      side.divisions.push({ faction: side.reserve.faction || side.faction, unit: side.reserve.unit || 0, count: side.reserve.count, level: side.reserve.level || 2, reserve: true, at: main ? { x: main.x + side.dir * (main.r + 60), y: main.y } : null, officer: { name: "The lord's reserve", stats: { lea: 9, mig: 6, int: 6, cha: 9 } } });
+    }
+    for (const side of this.sides) {
+      const field = side.divisions.filter(d => !d.garrison && !d.reserve);
+      side.divisions.forEach(d => this.makeDivision(side, d, field.indexOf(d), field.length, cfg));
+    }
+    for (const b of this.bases) b.div = this.divisions.find(d => d.garrison && d.garrison.baseIdx === b.id) || null;
     this.log(`The battle begins on the ${this.terrain}.`, null);
   }
+
+  makeDivision(side, d, k, n, cfg = {}) {
+    const faction = d.faction || side.faction;
+    const def = UNITS[faction][d.unit];
+    const role = def.role;
+    const R = ROLE[role];
+    const tier = this.unitTier(faction, d.unit);
+    const lvl = 1 + 0.06 * ((d.level || 1) - 1);
+    const mods = side.mods || {};
+    const mult = (1 + 0.22 * tier) * lvl;
+    const y0 = this.fh * (k + 1) / (n + 1);
+    const back = role === 'ranged' || role === 'magic' ? 60 : 0;
+    const gar = d.garrison || null;
+    const x0 = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
+    const x = gar ? gar.x : d.at ? d.at.x : x0, y = gar ? gar.y : d.at ? d.at.y : y0;
+    const unled = !!(gar || d.reserve);
+    const div = {
+      id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
+      stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
+      level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: !unled, captured: false },
+      garrison: gar ? { x, y, leash: gar.leash || 380, quiet: 0, baseIdx: gar.base } : null, dormant: !!gar, base: gar ? (typeof gar.base === 'number' ? (this.bases && this.bases[gar.base] ? this.bases[gar.base].name : 'a base') : gar.base) : null,
+      reserve: !!d.reserve, follow: null,
+      cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: d.reserve ? 'defend' : 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5 + (mods.morale || 0),
+      start: d.count, dead: 0, fled: 0, routed: false, rallied: 0, flankPhase: 0, chargeT: 0, lastHit: -9, inCombat: false, contactT: 0, color: side.color,
+    };
+    div.morale = div.baseMorale;
+    const cols = gar ? Math.max(6, Math.round(Math.sqrt(d.count))) : Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
+    div.cols = cols; div.spacing = gar ? 10 : role === 'cav' || role === 'heavy' ? 15 : 12;
+    div.soldiers = [];
+    for (let i = 0; i < d.count; i++) {
+      const s = { div, side: side.index, slot: i, x: 0, y: 0, hp: div.stats.hp, cd: this.r() * R.cd, target: null, anim: 0, at: this.r() * 4, dying: 0, alive: true, fled: false, vx: 0, vy: 0 };
+      const p = this.slotPos(div, i); s.x = p.x + (this.r() - 0.5) * 4; s.y = p.y + (this.r() - 0.5) * 4;
+      div.soldiers.push(s); this.soldiers.push(s);
+    }
+    this.divisions.push(div);
+    return div;
+  }
+  // ---------- bases ----------
+  basesTick() {
+    if ((this.steps % 15) !== 0) return;
+    for (const b of this.bases) {
+      const g = b.div; const held = g && g.side === b.side && this.aliveCount(g) > 0 && !g.routed;
+      if (held) continue;
+      // empty: whoever stands inside with no defenders left takes it
+      let mine = 0, theirs = 0;
+      for (const s of this.soldiers) { if (!s.alive || s.fled || s.div.routed) continue; const d2 = (s.x - b.x) ** 2 + (s.y - b.y) ** 2; if (d2 < (b.r + 30) ** 2) { if (s.side === b.side) mine++; else theirs++; } }
+      if (theirs > 0 && mine === 0) this.capture(b, 1 - b.side);
+    }
+  }
+  capture(b, by) {
+    const lost = this.sides[b.side];
+    b.side = by; b.takenAt = this.t;
+    if (b.kind === 'main') {
+      this.log(`${this.sides[by].name} storms ${b.name} of ${lost.name}! The camp burns.`, by, 'end');
+      this.over = true; this.winner = by; this.mainTaken = true; return;
+    }
+    this.log(`${this.sides[by].name} takes ${b.name}!`, by, 'good');
+    for (const d of this.divisions) if (d.side === 1 - by && !d.routed && !d.garrison) { const c = d.c || this.centroid(d); if (Math.hypot(c.x - b.x, c.y - b.y) < 500) d.morale -= 6; }
+    // a captured post sends a few men to hold it for its new owner
+    const side = this.sides[by]; const n = Math.max(20, Math.round(b.start * 0.1));
+    const ent = Math.max(0, UNITS[side.faction].findIndex(u => u.entry && (u.role === 'inf' || u.role === 'heavy')));
+    const div = this.makeDivision(side, { faction: side.faction, unit: ent, count: n, level: 2, garrison: { x: b.x, y: b.y, base: b.id }, officer: { name: 'Garrison', stats: { lea: 8, mig: 6, int: 6, cha: 9 } } }, 0, 1);
+    div.dormant = false; b.div = div;
+  }
+  basesHeld(side) { return this.bases.filter(b => b.side === side).length; }
 
   r() { return this.rand(); }
   unitTier(f, u) {
@@ -116,6 +179,7 @@ export class Battle {
     div.pending = m; this.messengers.push(m);
   }
   applyOrder(div, order) {
+    if (order.startsWith('follow:')) { div.follow = +order.slice(7); order = 'follow'; }
     div.state = order; div.flankPhase = 0; div.pending = null;
     if (order === 'charge') div.chargeT = this.t;
     if (order === 'flankL' || order === 'flankR') { const sign = order === 'flankL' ? -1 : 1; const c = this.centroid(div); div.flankPt = { x: c.x + div.facing * 160, y: Math.max(60, Math.min(this.fh - 60, c.y + sign * 300 * (div.side === 0 ? 1 : -1))) }; }
@@ -154,6 +218,7 @@ export class Battle {
     for (const s of this.soldiers) this.updateSoldier(s, dt);
     this.updateProjectiles(dt);
     this.updateFires();
+    if (this.bases.length) this.basesTick();
     for (const side of this.sides) if (side.ai) this.ai(side);
     this.checkEnd();
   }
@@ -216,12 +281,25 @@ export class Battle {
     for (const e of enemies) { const ec = e.c || this.centroid(e); const d = Math.hypot(ec.x - c.x, ec.y - c.y); if (d < td) { td = d; target = { div: e, c: ec }; } }
     if (target) div.facing = target.c.x > c.x ? 1 : -1;
     let goal = null, speedMul = 1;
-    if (div.garrison) { // unled defenders: fight what comes close, never chase far from their base
+    if (div.reserve) { // the lord's own troops: simple orders for the whole body
+      const own = this.bases.filter(b => b.side === div.side), foeB = this.bases.filter(b => b.side !== div.side);
+      const near = (list, p) => list.slice().sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      let anchor = null;
+      if (div.state === 'push') anchor = near(foeB, c);
+      else if (div.state === 'follow') { const f = this.divisions[div.follow]; if (f && !f.routed && this.aliveCount(f) > 0) { const fc = f.c || this.centroid(f); anchor = { x: fc.x - div.facing * 40, y: fc.y + 30 }; } else div.state = 'defend'; }
+      if (div.state === 'defend' || !anchor) {
+        // guard whichever of our bases the enemy is closest to
+        let worst = null, wd = 1e9; for (const b of own) for (const e of enemies) { const ec = e.c || this.centroid(e); const d = Math.hypot(ec.x - b.x, ec.y - b.y); if (d < wd) { wd = d; worst = b; } }
+        anchor = worst && wd < 700 ? worst : near(own, c) || { x: c.x, y: c.y };
+      }
+      const engage = target && td < (div.state === 'defend' ? 260 : 160);
+      goal = engage ? target.c : anchor;
+    } else if (div.garrison) { // unled defenders: fight what comes close, never chase far from their base
       const G = div.garrison;
       if (target && Math.hypot(target.c.x - G.x, target.c.y - G.y) < G.leash) goal = target.c; else goal = G;
     }
     const ranged = div.role === 'ranged' || div.role === 'magic';
-    if (!div.garrison) switch (div.state) {
+    if (!div.garrison && !div.reserve) switch (div.state) {
       case 'hold': goal = null; break;
       case 'advance': if (target) goal = ranged && td < div.stats.range * 0.85 ? null : target.c; break;
       case 'charge': if (target) { goal = target.c; speedMul = div.role === 'cav' ? 1.35 : 1.15; } break;
@@ -370,7 +448,14 @@ export class Battle {
       if (!f.hit && this.t >= f.land) {
         f.hit = true; const shaken = new Set();
         for (const s of this.soldiers) if (s.alive && !s.fled && (s.x - f.x) ** 2 + (s.y - f.y) ** 2 < f.r * f.r) { this.hit(s, 5 + this.r() * 8, null); shaken.add(s.div); }
-        for (const d of shaken) { d.morale -= 18; this.log(`Fire rains on the ${d.unitName} of ${d.officer.name}!`, d.side, d.side === f.side ? 'bad' : 'good'); }
+        for (const d of shaken) { if (d.garrison) continue; d.morale -= 18; this.log(`Fire rains on the ${d.unitName} of ${d.officer.name}!`, d.side, d.side === f.side ? 'bad' : 'good'); }
+        // fire arrows over a palisade: about two hundred of the garrison burn
+        for (const b of this.bases) {
+          if (b.side === f.side || !b.div || Math.hypot(b.x - f.x, b.y - f.y) > b.r + f.r) continue;
+          let n = 0; for (const s of b.div.soldiers) { if (n >= 200) break; if (s.alive && !s.fled && this.r() < 0.9) { this.hit(s, 1e6, null); n++; } }
+          b.div.morale -= 12; b.fired += n;
+          if (n) this.log(`Fire arrows rain on ${b.name}: ${n} of its garrison burn.`, b.side, 'bad');
+        }
       }
       if (f.hit && this.t < f.end && this.r() < 0.3) {
         for (const s of this.soldiers) if (s.alive && !s.fled && (s.x - f.x) ** 2 + (s.y - f.y) ** 2 < (f.r * 0.7) ** 2 && this.r() < 0.02) this.hit(s, 2, null);
@@ -388,7 +473,11 @@ export class Battle {
   // ---------- enemy general ----------
   ai(side) {
     if (!side.nextThink || this.t >= side.nextThink) side.nextThink = this.t + 2.5; else return;
-    const mine = this.divisions.filter(d => d.side === side.index && !d.routed && !d.garrison && this.aliveCount(d) > 0);
+    const mine = this.divisions.filter(d => d.side === side.index && !d.routed && !d.garrison && !d.reserve && this.aliveCount(d) > 0);
+    for (const rv of this.divisions) if (rv.reserve && rv.side === side.index && !rv.pending && !rv.routed) {
+      const want = side.ai === 'cautious' ? (this.t > 120 ? 'push' : 'defend') : side.ai === 'reckless' ? 'push' : this.t > 40 ? 'push' : 'defend';
+      if (rv.state !== want) this.issue(rv, want);
+    }
     const foes = this.enemiesOf(side.index);
     if (!foes.length) return;
     const style = side.ai;
@@ -420,6 +509,8 @@ export class Battle {
   }
 
   checkEnd() {
+    if (this.over) return;
+    if (this.bases.length) return this.checkEndBases();
     for (const side of this.sides) {
       const standing = this.divisions.filter(d => d.side === side.index && !d.routed && this.aliveCount(d) > 0);
       if (!standing.length) { this.over = true; this.winner = 1 - side.index; this.log(`${this.sides[1 - side.index].name} holds the field. Victory!`, 1 - side.index, 'end'); return; }
@@ -430,10 +521,25 @@ export class Battle {
     }
   }
 
+  // with bases: the attacker (side 0) must burn the main camp; failing that, the defender holds
+  checkEndBases() {
+    const fieldUp = i => this.divisions.some(d => d.side === i && !d.garrison && !d.routed && this.aliveCount(d) > 0);
+    const anyUp = i => this.divisions.some(d => d.side === i && !d.routed && this.aliveCount(d) > 0);
+    if (!anyUp(0)) { this.over = true; this.winner = 1; this.log(`The attack is broken. ${this.sides[1].name} holds the field.`, 1, 'end'); return; }
+    if (!anyUp(1)) { this.over = true; this.winner = 0; this.log(`${this.sides[0].name} holds the field. Victory!`, 0, 'end'); return; }
+    if (!fieldUp(0) && this.t > 20) { this.over = true; this.winner = 1; this.log(`The attackers' officers are all broken. ${this.sides[1].name} holds.`, 1, 'end'); return; }
+    if (this.t > 420) {
+      this.over = true;
+      const att = this.basesHeld(0), def = this.basesHeld(1);
+      this.winner = !fieldUp(1) && att > def ? 0 : 1;
+      this.log(this.winner === 1 ? `Night falls. The main camp of ${this.sides[1].name} still stands, and the attack fails.` : `Night falls with ${this.sides[1].name}'s army broken and most of its posts taken. ${this.sides[0].name} claims the day.`, this.winner, 'end');
+    }
+  }
+
   summary() {
     return this.sides.map(side => ({
       name: side.name, color: side.color, won: this.winner === side.index,
-      divisions: this.divisions.filter(d => d.side === side.index).map(d => ({ unit: d.unitName, officer: d.officer.name, fate: !d.officer.alive ? 'slain' : d.officer.captured ? 'captured' : 'survived', start: d.start, dead: d.dead, fled: d.fled, left: this.aliveCount(d), routed: d.routed, rallied: d.rallied })),
+      divisions: this.divisions.filter(d => d.side === side.index).map(d => ({ unit: d.unitName, officer: d.officer.name, garrison: !!d.garrison, reserve: d.reserve, fate: d.garrison || d.reserve ? 'unled' : !d.officer.alive ? 'slain' : d.officer.captured ? 'captured' : 'survived', start: d.start, dead: d.dead, fled: d.fled, left: this.aliveCount(d), routed: d.routed, rallied: d.rallied })),
     }));
   }
 }

@@ -1,7 +1,7 @@
 // The Dynasty — living world simulation.
 // Runs month by month. Everything that happens is written to the Chronicle.
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
-import { Battle, UNITS } from './battle.js';
+import { Battle, UNITS, layoutBases, fieldFor, BASE_LAYOUTS, BASE_CAPS } from './battle.js';
 import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
 import { installKnowledge } from './know.js';
 
@@ -217,6 +217,7 @@ export class World {
     // Independent villages
     for (const s of this.setts) if (!s.realmId) this.makeRealm(s, null);
     for (const realm of this.realms.values()) this.populateRealm(realm);
+    this.initDefences();
     // Vagabonds, bandits
     const vagCount = Math.round(target * 0.45);
     for (let i = 0; i < vagCount; i++) {
@@ -269,7 +270,7 @@ export class World {
   makeRealm(capital, rulerId) {
     const cul = cultureById(capital.culture);
     const r = { id: this.id(), name: capital.name, capital: capital.id, setts: new Set(), rulerId, heirId: null, culture: cul.id, color: this.realmColor(cul.color),
-      treasury: this.ri(40, 150), tier: 'Village', alive: true, founded: this.year, dynasty: null, allies: new Set(), truce: new Map(), mercs: [], fame: 0, aidGiven: 0 };
+      treasury: this.ri(40, 150), tier: 'Village', alive: true, founded: this.year, dynasty: null, allies: new Set(), truce: new Map(), mercs: [], fame: 0, aidGiven: 0, reserve: 0 };
     this.realms.set(r.id, r);
     this.joinRealm(capital, r);
     return r;
@@ -303,6 +304,25 @@ export class World {
     for (let i = 0; i < nOff; i++) this.addOfficer(r, this.makeChar({ culture: cul.id, age: this.ri(20, 50), role: 'officer', dynasty: this.dynastyName(), noble: true }));
     ruler.army = this.newArmy(ruler, r.setts.size >= 3 ? 1 : 0.35);
     this.pickHeir(r);
+  }
+  // ---------- 2.4 troop caps, the lord's reserve and garrisons ----------
+  troopCap(c) { const r = this.realm(c.realmId); return Math.round((100 + c.stats.lea * 40 + (c.level - 1) * 30) * (r && r.tier === 'Village' ? 0.5 : 1)); }
+  garrisonCap(s) { const r = this.realm(s.realmId); return Math.min(BASE_CAPS.main, Math.round(s.pop * (r && r.capital === s.id ? 0.8 : 0.5))); }
+  reserveCap(r) { return r.tier === 'Village' ? 0 : Math.min(5000, Math.round(this.realmPop(r) * 0.06)); }
+  initDefences() {
+    for (const s of this.setts) if (s.garrison == null) s.garrison = s.destroyed ? 0 : Math.round(this.garrisonCap(s) * (0.2 + this.r() * 0.3));
+    for (const r of this.realms.values()) if (r.reserve == null) r.reserve = r.alive ? Math.round(this.reserveCap(r) * (0.2 + this.r() * 0.3)) : 0;
+  }
+  // AI lords put spare gold into walls and their own household troops
+  investDefences(r) {
+    if (r.treasury < 150) return;
+    let gold = Math.min((r.treasury - 150) * 0.3, 200); if (gold <= 0) return;
+    const roomR = Math.max(0, this.reserveCap(r) - r.reserve);
+    const toR = Math.min(roomR, Math.round(gold * 2 * 0.5)); r.reserve += toR; r.treasury -= toR / 2; gold -= toR / 2;
+    // the holding nearest a rival gets the walls
+    const foes = this.neighbours(r); const mine = this.realmSetts(r);
+    const exposed = mine.slice().sort((a, b) => Math.min(...foes.flatMap(o => this.realmSetts(o).map(x => this.dist(x, a))), 99) - Math.min(...foes.flatMap(o => this.realmSetts(o).map(x => this.dist(x, b))), 99))[0];
+    if (exposed && gold > 0) { const n = Math.min(Math.round(gold * 3), this.garrisonCap(exposed) - exposed.garrison); if (n > 0) { exposed.garrison += n; r.treasury -= n / 3; } }
   }
   newArmy(c, scale = 1, faction = c.culture) { return { size: Math.round((80 + c.stats.lea * 18) * scale), level: this.ri(1, 3), xp: 0, wins: 0, losses: 0, faction, unit: this.pickUnit(c, faction) }; }
   pickUnit(c, faction) {
@@ -748,8 +768,8 @@ export class World {
         this.log(2, 'merc', `${m.name} takes ${def.name}'s gold and turns on ${att.name} mid-war.`, [m.captainId]);
       }
     }
-    const aOff = this.realmOfficers(att).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3);
-    const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3);
+    const aOff = this.realmOfficers(att).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
+    const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
     if (!aOff.length) return;
     const targets = this.realmSetts(def).sort((x, y) => Math.min(...this.realmSetts(att).map(s => this.dist(s, x))) - Math.min(...this.realmSetts(att).map(s => this.dist(s, y))));
     const target = targets[0]; if (!target) { w.over = true; return; }
@@ -773,8 +793,8 @@ export class World {
     if (g === 'forest') speed *= 0.8;
     if (!advance(this, m, target, speed, MOVE.sea)) { for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
     m.x = target.x; m.y = target.y; w.march = null;
-    const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 3);
-    this.battle(att, def, offs.slice(0, 3), dOff, target, w, m.attackerIsA);
+    const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
+    this.battle(att, def, offs.slice(0, 8), dOff, target, w, m.attackerIsA);
     for (const o of offs) { const home = this.sett(att.capital); if (home) { o.x = home.x; o.y = home.y; } }
   }
 
@@ -830,7 +850,7 @@ export class World {
     this.stats.battles++;
     ctx.index = this.stats.battles;
     ctx.cfg = this.battleConfig(ctx, duelSide);
-    const big = att.tier === 'Kingdom' || def.tier === 'Kingdom' || ctx.cfg.sides.reduce((a, s) => a + s.divisions.reduce((x, d) => x + d.count, 0), 0) > 1400;
+    const big = att.tier === 'Kingdom' || def.tier === 'Kingdom' || ctx.cfg.sides.reduce((a, s) => a + s.divisions.reduce((x, d) => x + d.count, 0), 0) > 3000;
     ctx.big = big;
     ctx.title = `Battle of ${target.name}: ${att.name} attacks ${def.name}`;
     const pid = this.playerId, pr = this.player && this.player.alive ? this.playerRealm() : null;
@@ -849,10 +869,11 @@ export class World {
   runProxy(cfg) {
     // auto-resolve: the same engine with each soldier standing for a company of men
     const proxy = JSON.parse(JSON.stringify(cfg)); delete proxy.script;
-    const biggest = Math.max(...proxy.sides.flatMap(s => s.divisions.map(d => d.count)));
+    const biggest = Math.max(...proxy.sides.flatMap(s => s.divisions.map(d => d.count)), ...(proxy.bases || []).map(b => b.count / 3));
     const coarse = !this.playerId; // history before you arrive is told in broader strokes
     const per = Math.max(1, biggest / (coarse ? 10 : 18));
-    for (const side of proxy.sides) { if (!side.ai) side.ai = 'balanced'; for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per)); }
+    for (const side of proxy.sides) { if (!side.ai) side.ai = 'balanced'; for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per)); if (side.reserve) side.reserve.count = Math.round(side.reserve.count / per); }
+    for (const b of proxy.bases || []) b.count = Math.max(2, Math.round(b.count / per));
     proxy.field = { w: 1000, h: 640 }; // a smaller table for the model armies: same fight, less empty ground to scan
     const b = new Battle(proxy); let n = 0; while (!b.over && n++ < (coarse ? 400 : 700)) b.step(coarse ? 0.6 : 0.4);
     if (!b.over) { b.t = 999; b.checkEnd(); }
@@ -879,10 +900,10 @@ export class World {
     const { att, def, aOff, dOff, target, war } = ctx;
     const famine = r => this.realmSetts(r).some(s => s.famine);
     const sideOf = (realm, offs, enemyOffs, idx) => {
-      const divisions = offs.map(o => ({ faction: o.army.faction || o.culture, unit: o.army.unit ?? 0, count: Math.max(20, Math.min(900, o.army.size)), level: o.army.level, officer: { name: o.name, stats: o.stats, ref: o.id } }));
+      const divisions = offs.map(o => ({ faction: o.army.faction || o.culture, unit: o.army.unit ?? 0, count: Math.max(20, Math.min(1500, o.army.size)), level: o.army.level, officer: { name: o.name, stats: o.stats, ref: o.id } }));
       for (const mid of realm.mercs) {
         const m = this.mercs.find(x => x.id === mid); const cap = m && this.char(m.captainId);
-        if (m && cap && cap.alive && divisions.length < 4) divisions.push({ faction: m.faction, unit: m.unit, count: Math.max(20, Math.min(700, m.size)), level: m.level, officer: { name: cap.name, stats: cap.stats, ref: cap.id, merc: m.id } });
+        if (m && cap && cap.alive && divisions.length < 8) divisions.push({ faction: m.faction, unit: m.unit, count: Math.max(20, Math.min(700, m.size)), level: m.level, officer: { name: cap.name, stats: cap.stats, ref: cap.id, merc: m.id } });
       }
       if (!divisions.length) {
         const head = this.char(realm.rulerId);
@@ -903,7 +924,27 @@ export class World {
     war.intel[att.id] = 0; war.intel[def.id] = 0;
     const s0 = sideOf(att, aOff, dOff, 0), s1 = sideOf(def, dOff, aOff, 1);
     if (Math.abs(parseInt(s0.color.slice(1), 16) - parseInt(s1.color.slice(1), 16)) < 0x202020) s1.color = '#e8e2d0';
-    return { seed: Math.floor(this.r() * 1e9), terrain: target.biome, season: this.season, sides: [s0, s1] };
+    // Dynasty Warriors field: 3-5 bases a side, set by the land. The defender's main camp is the town's own garrison.
+    const pattern = this.pick(BASE_LAYOUTS[target.biome] || ['2-1']);
+    const ent = (f, roles) => Math.max(0, UNITS[f].findIndex(u => u.entry && roles.includes(u.role)));
+    const aRes = att.reserve || 0, dRes = def.reserve || 0;
+    const aPool = Math.round(aRes * 0.6), dPool = Math.round(dRes * 0.5);
+    const bases = [];
+    for (const [side, realm, mainCount, pool] of [[0, att, Math.round(aPool * 0.5), Math.round(aPool * 0.5)], [1, def, target.garrison || 0, dPool]]) {
+      const list = layoutBases(pattern, side); const others = list.filter(b => b.kind !== 'main'); const W = others.reduce((a, b) => a + (b.kind === 'fort' ? 2 : 1), 0) || 1;
+      for (const b of list) {
+        const want = b.kind === 'main' ? mainCount : Math.round(pool * (b.kind === 'fort' ? 2 : 1) / W);
+        bases.push({ ...b, count: Math.max(30, Math.min(BASE_CAPS[b.kind], want)), faction: realm.culture, unit: ent(realm.culture, b.kind === 'fort' ? ['ranged', 'magic'] : ['inf', 'heavy']), level: 2, name: b.kind === 'main' ? (side === 1 ? `the walls of ${target.name}` : `the camp of ${realm.name}`) : `${realm.name}'s ${b.kind}` });
+      }
+    }
+    s0.reserve = { count: Math.min(5000, aRes - aPool), faction: att.culture, unit: ent(att.culture, ['inf', 'heavy']), level: 2 };
+    s1.reserve = { count: Math.min(5000, dRes - dPool), faction: def.culture, unit: ent(def.culture, ['inf', 'heavy']), level: 2 };
+    // keep the whole field within 30,000: trim garrisons and reserves first
+    const field = [s0, s1].reduce((a, s) => a + s.divisions.reduce((x, d) => x + d.count, 0), 0);
+    const extra = bases.reduce((a, b) => a + b.count, 0) + s0.reserve.count + s1.reserve.count;
+    if (field + extra > 30000) { const k = Math.max(0.1, (30000 - field) / extra); for (const b of bases) b.count = Math.max(30, Math.round(b.count * k)); s0.reserve.count = Math.round(s0.reserve.count * k); s1.reserve.count = Math.round(s1.reserve.count * k); }
+    const total = field + bases.reduce((a, b) => a + b.count, 0) + s0.reserve.count + s1.reserve.count;
+    return { seed: Math.floor(this.r() * 1e9), terrain: target.biome, season: this.season, sides: [s0, s1], bases, pattern, field: fieldFor(total) };
   }
 
   applyBattle(ctx, b) {
@@ -924,6 +965,23 @@ export class World {
       if (o && !d.officer.alive) { this.die(o, `fell in battle at ${target.name}`); lines.push(`${o.name} falls`); this.officerFallen(o, d.side === 0 ? att : def); }
       else if (o && d.officer.captured) { o.prisonerOf = (d.side === 0 ? def : att).id; lines.push(`${o.name} is taken prisoner`); }
     }
+    // what's left of the garrisons and the lords' reserves goes home with them
+    if (ctx.cfg.bases && b.bases) {
+      const ratio = d => d ? Math.max(0, (b.aliveCount(d) + d.fled) / d.start) : 0;
+      const left = [0, 0];
+      b.bases.forEach((B, i) => {
+        const orig = ctx.cfg.bases[i].count; const kept = B.side === B.home && B.div && B.div.side === B.home ? Math.round(orig * ratio(B.div)) : 0;
+        if (B.home === 1 && B.kind === 'main') target.garrison = kept; else left[B.home] += kept;
+      });
+      for (const i of [0, 1]) { const rd = b.divisions.find(d => d.reserve && d.side === i); const rc = ctx.cfg.sides[i].reserve ? ctx.cfg.sides[i].reserve.count : 0; left[i] += Math.round(rc * ratio(rd)); }
+      const aR = att.reserve || 0, dR = def.reserve || 0;
+      att.reserve = Math.max(0, Math.round(aR - Math.round(aR * 0.6) - (ctx.cfg.sides[0].reserve?.count || 0) + left[0]));
+      def.reserve = Math.max(0, Math.round(dR - Math.round(dR * 0.5) - (ctx.cfg.sides[1].reserve?.count || 0) + left[1]));
+      const taken = b.bases.filter(B => B.side !== B.home);
+      if (b.mainTaken) lines.push(`${wonSide === 0 ? att.name : def.name} storms the main camp`);
+      else if (taken.length) lines.push(`${taken.length} post${taken.length === 1 ? '' : 's'} change hands`);
+      if (b.bases.some(B => B.fired > 0)) lines.push('fire arrows burn the garrisons');
+    }
     const routs = [...new Set(b.divisions.filter(d => d.routed && d.side !== wonSide).map(d => this.plural(d.unitName)))];
     if (b.fires.length) lines.push(`fire arrows rain on the field`);
     if (routs.length) lines.push(`the ${routs.slice(0, 3).join(', ')} break and flee`);
@@ -932,7 +990,7 @@ export class World {
     if (lead && lead.army && lead.army.wins >= 6 && this.grantDeed(lead, 'Legendary Army')) lines.push(`${lead.name}'s host is hailed as a Legendary Army`);
     if (lead && lead.army && lead.army.wins >= 3 && !lead.titles.rank && lead.role === 'officer') { lead.titles.rank = wR.tier === 'Kingdom' && this.realmOfficers(wR).every(o => o.titles.rank !== 'Marshal') ? 'Marshal' : 'General'; lines.push(`${lead.name} is named ${lead.titles.rank}`); lead.loyalty = Math.min(100, lead.loyalty + 15); }
     const decisive = loserStart && loserCas / loserStart > 0.45;
-    const sizes = i => ctx.cfg.sides[i].divisions.reduce((a, d) => a + d.count, 0);
+    const sizes = i => ctx.cfg.sides[i].divisions.reduce((a, d) => a + d.count, 0) + (ctx.cfg.sides[i].reserve?.count || 0) + (ctx.cfg.bases || []).filter(x => x.side === i).reduce((a, x) => a + x.count, 0);
     const troopWord = `${sizes(0).toLocaleString()} against ${sizes(1).toLocaleString()}`;
     const imp = decisive || lines.length > 1 || ctx.big ? 2 : 1;
     this.log(imp, 'battle', `Battle of ${target.name} (${this.season.toLowerCase()}, ${target.biome}). ${att.name} attacks ${def.name}, ${troopWord}. ${wR.name}, led by ${lead ? this.fullName(lead) : 'its levies'}, ${decisive ? 'crushes' : 'defeats'} ${lR.name}.${lines.length ? ' ' + lines.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : ''}`, [...ctx.aOff, ...ctx.dOff].map(o => o.id));
@@ -1251,7 +1309,7 @@ export class World {
         c.loyalty += (this.op(c, ruler) > 20 ? 2 : -1) + (r.treasury < 0 ? -6 : 0) + (this.has(ruler, 'cruel') ? -3 : 0) + (this.has(c, 'loyal') ? 3 : 0) + (this.has(c, 'ambitious') ? -2 : 0);
         c.loyalty = Math.max(0, Math.min(100, c.loyalty));
         this.gainXp(c, 10);
-        if (c.army) { c.army.size = Math.min(Math.round((90 + c.stats.lea * 22) * (r.tier === 'Village' ? 0.5 : 1.2)), c.army.size + Math.round(this.realmPop(r) * 0.01)); }
+        if (c.army) { c.army.size = Math.max(Math.min(c.army.size, this.troopCap(c)), Math.min(this.troopCap(c), c.army.size + Math.round(this.realmPop(r) * 0.01))); }
         // oaths of brotherhood
         if (!c.oath.length && this.chance(0.08)) {
           const bro = this.realmOfficers(r).find(o => o.id !== c.id && !o.oath.length && this.op(c, o) + this.ri(0, 60) > 50);
@@ -1274,8 +1332,12 @@ export class World {
       if (!this.isPlayer(ruler) && r.treasury > 250) {
         // AI rulers turn surplus gold into soldiers
         const offs = this.realmOfficers(r); const spend = Math.min((r.treasury - 250) * 0.6, this.levyCap(r) / 2);
-        if (offs.length && spend > 0) { r.treasury -= spend; const each = Math.round(spend * 2 / offs.length); for (const o of offs) o.army.size += each; }
+        if (offs.length && spend > 0) {
+          r.treasury -= spend; const each = Math.round(spend * 2 / offs.length);
+          for (const o of offs) { const room = Math.max(0, this.troopCap(o) - o.army.size); const add = Math.min(room, each); o.army.size += add; r.reserve = Math.min(this.reserveCap(r), (r.reserve || 0) + each - add); }
+        }
       }
+      if (!this.isPlayer(ruler)) this.investDefences(r);
       const need = r.tier === 'Village' ? 0 : Math.ceil(r.setts.size / 2) + 1;
       if (this.realmOfficers(r).length - 1 < need && this.chance(0.5)) {
         const v = this.living().find(c => c.role === 'vagabond' && this.age(c) >= 18 && this.realmSetts(r).some(s => this.dist(s, c) < 6));
@@ -1908,8 +1970,20 @@ export class World {
   }
   levyCap(r) { return Math.round(this.realmPop(r) * 0.06); }
   act_levy(a) {
-    const r = this.playerRealm(), o = this.char(a.id); if (!o || !o.army || o.realmId !== r.id) return 'They command no army.';
-    const n = Math.min(a.n || 50, Math.max(0, this.levyCap(r) - (r.leviedYear === this.year ? r.levied || 0 : 0)));
+    const r = this.playerRealm();
+    if (a.id === 'reserve') {
+      const n = Math.min(a.n || 100, Math.max(0, this.levyCap(r) - (r.leviedYear === this.year ? r.levied || 0 : 0)), this.reserveCap(r) - (r.reserve || 0));
+      if (n <= 0) return (r.reserve || 0) >= this.reserveCap(r) ? 'Your reserve is as large as your lands can keep.' : 'Your people have given all the levies they can this year.';
+      const cost = Math.ceil(n / 2); if (r.treasury < cost) return `Raising ${n} troops costs ${cost} gold.`;
+      if (r.leviedYear !== this.year) { r.leviedYear = this.year; r.levied = 0; }
+      r.levied += n; r.treasury -= cost; r.reserve = (r.reserve || 0) + n;
+      for (const s of this.realmSetts(r)) s.pop = Math.max(30, s.pop - Math.round(n / r.setts.size));
+      return `${n} men join your own reserve. It now numbers ${r.reserve}.`;
+    }
+    const o = this.char(a.id); if (!o || !o.army || o.realmId !== r.id) return 'They command no army.';
+    const room = this.troopCap(o) - o.army.size;
+    if (room <= 0) return `${o.name} already leads all the troops they can (${this.troopCap(o)}). Raise their level or put the men in your reserve.`;
+    const n = Math.min(a.n || 50, room, Math.max(0, this.levyCap(r) - (r.leviedYear === this.year ? r.levied || 0 : 0)));
     if (n <= 0) return 'Your people have given all the levies they can this year.';
     const cost = Math.ceil(n / 2); if (r.treasury < cost) return `Raising ${n} troops costs ${cost} gold.`;
     if (r.leviedYear !== this.year) { r.leviedYear = this.year; r.levied = 0; }
@@ -1918,6 +1992,14 @@ export class World {
     const a0 = o.army; a0.xp = Math.round(a0.xp * a0.size / (a0.size + n)); a0.size += n;
     for (const s of this.realmSetts(r)) s.pop = Math.max(30, s.pop - Math.round(n / r.setts.size));
     return `${n} new ${this.plural(this.unitName(a0))} join ${o.name}'s army.`;
+  }
+  act_fortify(a) {
+    const r = this.playerRealm(), s = this.sett(a.sett); if (!r || !s || s.realmId !== r.id) return 'That is not yours to fortify.';
+    const n = Math.min(a.n || 100, this.garrisonCap(s) - (s.garrison || 0));
+    if (n <= 0) return `${s.name} holds all the garrison it can (${this.garrisonCap(s)}).`;
+    const cost = Math.ceil(n / 3); if (r.treasury < cost) return `Garrisoning ${n} more troops costs ${cost} gold.`;
+    r.treasury -= cost; s.garrison = (s.garrison || 0) + n;
+    return `${n} more troops man the walls of ${s.name} (${s.garrison} in all).`;
   }
   act_transfer(a) {
     const r = this.playerRealm(), from = this.char(a.from), to = this.char(a.to);
@@ -2228,6 +2310,7 @@ export class World {
     buildGeo(w, true); // land, sea, wilds and territories are rebuilt from the map
     w.known = o.knownStr && o.knownStr.length === w.w * w.h ? o.knownStr.split('').map(Number) : null; delete w.knownStr;
     if (!w.known) w.kn = null; // saves from before 2.3: you know the whole world
+    w.initDefences(); // saves from before 2.4: walls and reserves appear
     applyMod(w.mod); if (!w.tune) w.tune = { war: 1, monsters: 1, famine: 1, plots: 1, tournaments: 1 };
     delete w.v;
     return w;

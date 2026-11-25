@@ -192,3 +192,13 @@ button.card { width: 100%; text-align: left; color: var(--ink); font: inherit; d
 .mbar > div { height: 100%; width: 0; background: var(--gold); }
 .clock.paused .mbar > div { background: var(--dim); }
 .wfollow { position: absolute; right: 8px; top: 56px; }
+
+/* 2.4 officer portraits on the battle cards */
+.bport { width: 28px; height: 28px; image-rendering: pixelated; display: inline-block; vertical-align: middle; margin: -6px 4px -4px -2px; }
+.bdiv.res { border-color: var(--gold); }
+
+/* 2.4 up to 8 officers a side: one scrolling strip of officer cards so the field stays visible */
+.bdivs { display: flex; overflow-x: auto; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.bdivs > .bdiv { flex: 0 0 calc((100% - 12px) / 3); scroll-snap-align: start; }
+.bdivs.two > .bdiv { flex: 0 0 calc((100% - 18px) / 4); }
+.bdiv.side1 { border-top-style: dashed; }

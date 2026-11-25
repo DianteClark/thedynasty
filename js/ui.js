@@ -94,10 +94,11 @@ function resolvePending() {
   if (ctx.playerSide == null) return new Promise(res => watchBattle(ctx.cfg, info, b => { world.finishPending(b, { mode: 'watch' }); save(); render(); res(); }));
   return new Promise(res => {
     const mine = ctx.cfg.sides[ctx.playerSide], theirs = ctx.cfg.sides[1 - ctx.playerSide];
-    const count = s => s.divisions.reduce((a, d) => a + d.count, 0);
+    const count = s => s.divisions.reduce((a, d) => a + d.count, 0) + (s.reserve?.count || 0) + (ctx.cfg.bases || []).filter(b => b.side === ctx.cfg.sides.indexOf(s)).reduce((a, b) => a + b.count, 0);
     openSheet(`<h2>⚔ ${esc(info.title)}</h2>
       <div class="sub">${esc(ctx.cfg.season)} · ${esc(ctx.cfg.terrain)}</div>
-      <div class="kv"><div><b>${count(mine).toLocaleString()}</b><small>Your side</small></div><div><b>${count(theirs).toLocaleString()}</b><small>The enemy</small></div><div><b>${mine.divisions.length} v ${theirs.divisions.length}</b><small>Divisions</small></div></div>
+      <div class="kv"><div><b>${count(mine).toLocaleString()}</b><small>Your side</small></div><div><b>${count(theirs).toLocaleString()}</b><small>The enemy</small></div><div><b>${mine.divisions.length} v ${theirs.divisions.length}</b><small>Officers</small></div></div>
+      ${ctx.cfg.bases ? `<div class="sub" style="margin-top:6px">Each side holds ${ctx.cfg.bases.length / 2} bases (${esc(ctx.cfg.pattern || '')}). ${ctx.playerSide === 0 ? 'Burn their main camp to win.' : 'Hold your main camp until nightfall to win.'}</div>` : ''}
       <button class="btn" data-bc="command">Command the battle</button>
       <button class="btn ghost" data-bc="watch">Let your generals fight, and watch</button>
       <button class="btn ghost" data-bc="quick">Resolve it quickly</button>
@@ -428,7 +429,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v1.0. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.4. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 

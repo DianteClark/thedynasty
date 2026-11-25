@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.3
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.4
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -18,7 +18,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 
 - **A living world:** procedurally generated worlds in three sizes with continents, islands and named wilds, ports and sailing, earthquakes, wildfires and floods that reshape the land, seasons, harvests and famine, a ladder of power from vagabond bands to kingdoms, overextension, uprisings with causes, succession crises, monsters that grow and break out, and ruins that get resettled.
 - **People:** officers with five stats, levels and up to three titles (rank, deed, reputation) that can counter each other; marriages, children who take after their parents, oaths, grudges, wards, rumors and reputations.
-- **War:** hosts march across the map; battles are fought on a real battle engine with HAS sprites for all ten cultures, morale and routs, flanking, messenger-delayed orders, stratagems, troop tiers you can recognise on sight, and generals who fight in character.
+- **War:** hosts march (and sail) across the map; battles are Dynasty Warriors-style fields with bases, garrisons and up to 30,000 troops, fought on a real battle engine with HAS sprites for all ten cultures, morale and routs, flanking, messenger-delayed orders, stratagems, troop tiers you can recognise on sight, and generals who fight in character.
 - **Intrigue:** spies, assassins, agitators, envoys, caravans and rumors travel the map and can be caught or raided.
 - **Ruling:** your council (steward, spymaster, captain), granaries, levies, armies, diplomacy and peace terms.
 - **Honour:** duels and tournaments you can watch, challenges and stances, the unique title Strongest Under Heaven.
@@ -192,4 +192,17 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **Limited knowledge of people:** you know your own circle, the rulers of realms you know, the truly famous, and anyone whose deeds have reached you. News of great events travels everywhere; lesser news reaches you only if it's about someone you know. The Chronicle and the People tab follow the same rules.
 - **Titles must be discovered:** you learn what titles someone holds by meeting them, hearing of their deeds, or having a spy bring back the names and titles of their whole court. Stats still shows world numbers, but only the titles you've discovered.
 - Saves from before 2.3 keep knowing the whole world.
+
+## 2.4: Dynasty Warriors battles
+
+- **Bases:** every war battle has 3 to 5 bases a side, laid out by the land (a 1-1-1 line through mountain passes, a wide 3-2 on open plains, and so on). The attacker must burn the defender's **main camp**; if it still stands at nightfall, the attack has failed.
+- **Garrisons:** each base is held by troops with no officer, up to 5,000 in the main camp, 2,500 in a fort and 1,000 in an outpost. They sleep until enemies come near, then fight and chase only a short way from their walls. An officer with 100 men who wanders into a post with 400 is in trouble. A base falls when its garrison is gone and your troops stand in it; a captured post sends a few men to hold it for you.
+- **Where the numbers come from:** the defender's main camp is the town's own garrison, so the walls you pay for matter. Each lord also keeps a **reserve** of household troops, up to 5,000, which mans the other bases and takes the field.
+- **The lord's reserve** takes simple orders for the whole body: **Defend** your bases, **Push** on theirs, or **Reinforce** an officer who is outnumbered.
+- **Up to 8 officers a side,** each leading 100 to 1,500 troops set by Leadership and level. A realm with more officers fields its best 8.
+- **Fire arrows hit bases too:** a volley over a palisade burns about 200 of its garrison, enough to make a weak post takeable.
+- **Scale:** up to 30,000 troops on a field, with sleeping garrisons keeping the number actually fighting much lower. If a clash gets too heavy, the battle slows a touch instead of stuttering.
+- **Camera:** zooms out to Mid at most. The officer cards at the bottom (with portraits) scroll sideways; tap one to jump to their troops. When watching, the camera follows the fighting.
+- **On your You tab:** each officer's troop cap, your reserve (raise it with levies), and the garrison of each holding (fortify it with gold).
+- **Practice:** the battle sandbox has base layouts too.
 
