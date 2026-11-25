@@ -15,7 +15,7 @@ export const SIZES = {
   enormous: { w: 180, h: 120, setts: 220, conts: 4, isles: 16, label: 'Enormous' },
 };
 // how far things move in a month, in map cells
-export const MOVE = { land: 5, sea: 9 };
+export const MOVE = { land: 13, sea: 30 };
 
 export const SEASONS = ['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer', 'Summer', 'Summer', 'Autumn', 'Autumn', 'Autumn', 'Winter'];
 export const MONTHS = ['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'];
@@ -246,7 +246,7 @@ export class World {
     if (m.power >= 2.4 && m.key !== 'dragon' && !m.rift && this.chance(0.6)) L.name = beastName(() => this.r());
     return L;
   }
-  tripMonths(from, to) { return tripMonths(this, from, to, MOVE.land * 1.05 * (this.season === 'Winter' ? 0.55 : 1), MOVE.sea); }
+  tripMonths(from, to) { return tripMonths(this, from, to, MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1), MOVE.sea); }
   wildOf(p) { const id = this.wildId && this.wildId[Math.round(p.y) * this.w + Math.round(p.x)]; return id ? this.wilds[id - 1] : null; }
   lairName(L) { const M = MON[L.key]; const wd = L.wild && this.wilds[L.wild - 1]; return `${L.name ? `${L.name}, ${M.the}` : M.the}${wd ? ` of ${wd.name}` : ''}`; }
   landName(p) { const l = this.landId && landAt(this, p); return l ? this.lands[l - 1].name : ''; }
@@ -788,7 +788,7 @@ export class World {
     const offs = m.officers.map(id => this.char(id)).filter(o => o && o.alive && !o.prisonerOf && o.realmId === att.id && o.army);
     if (!offs.length) { w.march = null; return; }
     const g = this.grid[Math.max(0, Math.min(this.h - 1, Math.round(m.y)))]?.[Math.max(0, Math.min(this.w - 1, Math.round(m.x)))];
-    let speed = MOVE.land * (this.season === 'Winter' ? 0.5 : 1);
+    let speed = MOVE.land * (this.season === 'Winter' ? 0.7 : 1);
     if (g === 'swamp' || g === 'mountain') speed *= 0.6;
     if (g === 'forest') speed *= 0.8;
     if (!advance(this, m, target, speed, MOVE.sea)) { for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
@@ -1651,7 +1651,7 @@ export class World {
       if (!dest || (t.bandit && !dest.alive) || (t.lair && !dest.alive)) { p.task = null; this.you(`Your quarry is gone before you arrive.`, [], 1); }
       else {
         const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
-        let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.55 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
+        let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
         if (!advance(this, p, dest, sp, MOVE.sea)) {
           const b = !p.atSea && this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
           if (b && !t.bandit && this.chance(0.06)) { p.task = null; this.you(`Bandits under ${this.fullName(b)} ambush you on the road!`, [b.id], 2); this.skirmish(b, true); }

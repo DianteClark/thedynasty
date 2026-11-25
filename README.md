@@ -9,7 +9,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 ## How to play
 
 1. **Create your character** on the 🛡 You tab: origin, culture (ten of them), name, and ironman or casual.
-2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every two minutes. You can pause (❚❚), but you can't hurry time: you only control yourself.
+2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every minute. You can pause (❚❚), but you can't hurry time: you only control yourself.
 3. **Act** from the You tab, or by tapping things on the 🗺 Map: travel, take contracts, raise armies, marry, scheme, fight.
 4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
 5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
@@ -178,7 +178,7 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 ## 2.2: live, map-first play
 
 - **The map is the main screen.** You land on it when a game starts or loads, and the camera follows you. Pan away to look around, then tap **⌖ You** to come back.
-- **Real time:** one month passes every two minutes, shown as a day count and a bar under the date. ❚❚ pauses the whole world. There are no more skip buttons: you control yourself, not time.
+- **Real time:** one month passes every minute (this was two minutes in 2.2), shown as a day count and a bar under the date. ❚❚ pauses the whole world. There are no more skip buttons: you control yourself, not time.
 - **Smooth movement:** armies, fleets, caravans, spies and you glide across the map through the month instead of jumping.
 - **Officers on the march** each ride with a couple of their soldiers, so a host shows who leads it.
 - **Two ways in:** start on the first day of Year 1, or be dropped into a world that has lived through a random 30 to 100 years.

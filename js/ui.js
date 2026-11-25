@@ -9,7 +9,7 @@ import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const SAVE_KEY = 'dynasty.save.v2';
-const MONTH_MS = 120000; // one month of the world passes every two minutes
+const MONTH_MS = 60000; // one month of the world passes every minute
 const TYPE_LABELS = { you: 'You', war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
 let world, playing = true, busy = false, tab = 'you', acc = 0, watchMode = 'big', creatingLife = false;
