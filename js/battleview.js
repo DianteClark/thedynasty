@@ -78,7 +78,7 @@ export function handleBattleSetupClick(t, view) {
 }
 
 // ---------- live battle ----------
-let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, spectator = null, acc = 0, canvas, g, mini, mg, groundCanvas, corpseCanvas, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
+let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, spectator = null, acc = 0, mySide = 0, command = null, canvas, g, mini, mg, groundCanvas, corpseCanvas, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
 
 function startBattle() {
   const scale = SIZES[setup.size];
@@ -91,15 +91,25 @@ function startBattle() {
     mkSide(setup.foe, foePicks, officersFor('foe', setup.foe), `The ${cultureById(setup.foe).name} host`, '#ff5a4a', setup.ai),
   ] });
   for (const k of Object.keys(officers)) delete officers[k]; // fresh officers next time
-  spectator = null;
+  spectator = null; command = null; mySide = 0;
   buildScreen();
+}
+
+// Command your own side in a battle from the living world.
+export async function commandBattle(cfg, info, side, onDone) {
+  await loadAssets();
+  B = new Battle(cfg);
+  spectator = null; command = { info, onDone }; mySide = side;
+  toasts = [];
+  buildScreen();
+  toasts.push({ text: info.title, cls: 'strat', at: performance.now() + 3000 });
 }
 
 // Watch a battle from the living world: both sides are led by their own generals.
 export async function watchBattle(cfg, info, onDone) {
   await loadAssets();
   B = new Battle(cfg);
-  spectator = { info, onDone };
+  spectator = { info, onDone }; command = null; mySide = 0;
   toasts = [];
   buildScreen();
   toasts.push({ text: info.title, cls: 'strat', at: performance.now() + 3000 });
@@ -113,7 +123,7 @@ function buildScreen() {
       <div class="bspeed">${[['pause', '❚❚'], ['1', '1×'], ['2', '2×'], ['4', '4×']].map(([k, l]) => `<button class="bbtn ${k === '1' ? 'on' : ''}" data-b="speed" data-v="${k}">${l}</button>`).join('')}</div></div>
     <div class="btoasts" id="btoasts"></div>
     <canvas class="bmini" width="160" height="100"></canvas>
-    ${spectator ? '<button class="bbtn fire" data-b="skip">⏭ Skip to the end</button>' : '<button class="bbtn fire" data-b="fire">🔥 Fire volley</button>'}
+    ${spectator ? '<button class="bbtn fire" data-b="skip">⏭ Skip to the end</button>' : `<div class="bfirebar"><button class="bbtn" data-b="fire">🔥 Fire volley</button>${command ? '<button class="bbtn" data-b="handover">🎖 Let your generals finish</button>' : ''}</div>`}
     <div class="bdivs" id="bdivs"></div>
     <div class="border" id="border" hidden></div>
     <div class="bresult" id="bresult" hidden></div>`;
@@ -122,8 +132,9 @@ function buildScreen() {
   mini = root.querySelector('.bmini'); mg = mini.getContext('2d');
   buildGround();
   const fit = () => { const dpr = Math.min(2, window.devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; cam.dpr = dpr; };
-  cam = spectator ? { x: FIELD.w / 2, y: FIELD.h / 2, z: Math.max(0.35, innerWidth / FIELD.w * 1.05), dpr: 1 } : { x: 300, y: FIELD.h / 2, z: 1.5, dpr: 1 };
+  cam = spectator ? { x: FIELD.w / 2, y: FIELD.h / 2, z: Math.max(0.35, innerWidth / FIELD.w * 1.05), dpr: 1 } : { x: mySide === 0 ? 300 : FIELD.w - 300, y: FIELD.h / 2, z: 1.5, dpr: 1 };
   fit(); window.addEventListener('resize', fit); root._fit = fit;
+  if (!spectator) { const own = B.divisions.filter(d => d.side === mySide); if (own.length) { cam.x = own.reduce((a, d) => a + d.cx, 0) / own.length + (mySide === 0 ? 120 : -120); cam.y = own.reduce((a, d) => a + d.cy, 0) / own.length; } }
   bindInput();
   seenEvents = 0; sel = null; targeting = false; speed = 1; paused = false; lastT = performance.now(); acc = 0; if (!spectator) toasts = [];
   renderDivCards();
@@ -186,7 +197,7 @@ function draw() {
     if (B.aliveCount(div) <= 0) continue;
     const c = div.c || B.centroid(div);
     if (div === sel) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.ellipse(c.x, c.y, div.cols * div.spacing * 0.75, div.cols * div.spacing * 0.75, 0, 0, 7); g.stroke(); }
-    if (div.side === 0 && div.pending) { const m = div.pending; g.strokeStyle = 'rgba(255,215,106,.6)'; g.setLineDash([4, 5]); g.lineWidth = 1.5 / cam.z; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(div.officer.x, div.officer.y); g.stroke(); g.setLineDash([]); }
+    if (div.side === mySide && div.pending) { const m = div.pending; g.strokeStyle = 'rgba(255,215,106,.6)'; g.setLineDash([4, 5]); g.lineWidth = 1.5 / cam.z; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(div.officer.x, div.officer.y); g.stroke(); g.setLineDash([]); }
   }
   // soldiers sorted by y, with team color under their feet
   const live = B.soldiers.filter(s => (s.alive || s.dying > 0) && !s.fled);
@@ -231,7 +242,7 @@ function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `
 let lastCards = 0;
 function hud() {
   root.querySelector('#btime').textContent = fmt(B.t);
-  const fb = root.querySelector('[data-b=fire]'); if (fb) { fb.disabled = B.sides[0].fireUsed; fb.classList.toggle('on', targeting); fb.textContent = targeting ? 'Tap the map to aim…' : B.sides[0].fireUsed ? '🔥 Volley spent' : '🔥 Fire volley'; }
+  const fb = root.querySelector('[data-b=fire]'); if (fb) { fb.hidden = B.sides[mySide].canFire === false; fb.disabled = B.sides[mySide].fireUsed || !!B.sides[mySide].ai; fb.classList.toggle('on', targeting); fb.textContent = targeting ? 'Tap the map to aim…' : B.sides[mySide].fireUsed ? '🔥 Volley spent' : '🔥 Fire volley'; }
   while (seenEvents < B.events.length) { const e = B.events[seenEvents++]; if (e.t > 0.1) toast(e); }
   const tb = root.querySelector('#btoasts'); const now = performance.now();
   toasts = toasts.filter(t => now - t.at < 5000); tb.innerHTML = toasts.slice(-4).map(t => `<div class="btoast ${t.cls}">${esc(t.text)}</div>`).join('');
@@ -240,13 +251,13 @@ function hud() {
 }
 function toast(e) {
   if (spectator) { toasts.push({ text: e.text, cls: e.kind === 'strat' ? 'strat' : '', at: performance.now() }); return; }
-  const mine = e.side === 0; let cls = '';
+  const mine = e.side === mySide; let cls = '';
   if (e.kind === 'bad') cls = mine ? 'bad' : 'good'; else if (e.kind === 'good') cls = mine ? 'good' : 'bad'; else if (e.kind === 'strat') cls = 'strat';
   toasts.push({ text: e.text, cls, at: performance.now() });
 }
 function renderDivCards() {
   const box = root.querySelector('#bdivs');
-  const showSides = spectator ? [0, 1] : [0];
+  const showSides = spectator ? [0, 1] : [mySide];
   box.classList.toggle('two', !!spectator);
   box.innerHTML = B.divisions.filter(d => showSides.includes(d.side)).map(d => {
     const alive = B.aliveCount(d); const st = d.routed ? 'Routing!' : alive <= 0 ? 'Destroyed' : d.pending ? `Messenger: ${ORDERS[d.pending.order]} (${Math.max(0, d.pending.eta - B.t).toFixed(0)}s)` : ORDERS[d.state] || d.state;
@@ -258,20 +269,20 @@ function renderDivCards() {
   }).join('');
 }
 function openOrders(div) {
-  if (spectator) return;
+  if (spectator || B.sides[mySide].ai) return;
   sel = div; const box = root.querySelector('#border');
   if (div.routed || B.aliveCount(div) <= 0) { box.hidden = true; return; }
   box.hidden = false;
   box.innerHTML = `<div class="bordtitle">${esc(div.unitName)} · ${esc(div.officer.name)}<button class="bbtn" data-b="closeorders">✕</button></div>
     <div class="bordgrid">${Object.entries(ORDERS).map(([k, l]) => `<button class="bbtn ${div.state === k ? 'on' : ''}" data-b="order" data-o="${k}">${l}</button>`).join('')}</div>
-    <div class="sub" style="margin-top:6px">Leadership ${div.officer.stats.lea}: a messenger takes about ${(Math.hypot(div.officer.x - B.sides[0].hq.x, div.officer.y - B.sides[0].hq.y) / (150 * (0.8 + div.officer.stats.lea * 0.025))).toFixed(1)}s to reach them.</div>`;
+    <div class="sub" style="margin-top:6px">Leadership ${div.officer.stats.lea}: a messenger takes about ${(Math.hypot(div.officer.x - B.sides[mySide].hq.x, div.officer.y - B.sides[mySide].hq.y) / (150 * (0.8 + div.officer.stats.lea * 0.025))).toFixed(1)}s to reach them.</div>`;
 }
 function showResult() {
   const sum = B.summary(); const box = root.querySelector('#bresult'); box.hidden = false;
-  const won = B.winner === 0;
+  const won = B.winner === mySide;
   box.innerHTML = `<h2>${spectator ? esc(B.sides[B.winner].name) + ' wins' : won ? 'Victory' : 'Defeat'}</h2><div class="sub">${esc(B.events[B.events.length - 1].text)} Battle lasted ${fmt(B.t)}.</div>
     ${sum.map(s => `<h3 style="color:${s.color}">${esc(s.name)}</h3>${s.divisions.map(d => `<div class="bres"><b>${esc(d.unit)}</b> under ${esc(d.officer)} <span class="sub">(${d.fate})</span><div class="sub">${d.left} of ${d.start} standing · ${d.dead} fallen${d.routed ? ' · routed' : ''}${d.rallied ? ' · rallied once' : ''}</div></div>`).join('')}`).join('')}
-    ${spectator ? '<button class="btn" data-b="done">Continue the chronicle</button>' : '<button class="btn" data-b="again">Fight another battle</button><button class="btn ghost" data-b="exit">Back to the world</button>'}`;
+    ${spectator || command ? '<button class="btn" data-b="done">Continue the chronicle</button>' : '<button class="btn" data-b="again">Fight another battle</button><button class="btn ghost" data-b="exit">Back to the world</button>'}`;
 }
 
 function bindInput() {
@@ -294,12 +305,13 @@ function bindInput() {
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-b]'); if (!t) return;
     const b = t.dataset.b;
-    if (b === 'exit') { if (spectator) { skipToEnd(); return; } return exitBattle(); }
+    if (b === 'exit') { if (spectator) { skipToEnd(); return; } if (command) { B.takeover(mySide); skipToEnd(); return; } return exitBattle(); }
+    if (b === 'handover') { B.takeover(mySide); return; }
     if (b === 'skip') return skipToEnd();
-    if (b === 'done') { const sp = spectator, bb = B; exitBattle(); spectator = null; sp.onDone(bb); return; }
+    if (b === 'done') { const sp = spectator || command, bb = B; exitBattle(); spectator = null; command = null; sp.onDone(bb); return; }
     if (b === 'again') { exitBattle(); return startBattle(); }
     if (b === 'speed') { root.querySelectorAll('[data-b=speed]').forEach(x => x.classList.toggle('on', x === t)); if (t.dataset.v === 'pause') paused = true; else { paused = false; speed = +t.dataset.v; } }
-    if (b === 'fire' && !B.sides[0].fireUsed) { targeting = !targeting; }
+    if (b === 'fire' && !B.sides[mySide].fireUsed) { targeting = !targeting; }
     if (b === 'zoom') { const far = Math.max(0.35, innerWidth / FIELD.w * 1.05); if (cam.z > far + 0.1) { cam.z = far; cam.x = FIELD.w / 2; cam.y = FIELD.h / 2; } else cam.z = 1.5; }
     if (b === 'sel') { const d = B.divisions[+t.dataset.id]; openOrders(d); const c = d.c || B.centroid(d); cam.x = c.x; cam.y = c.y; }
     if (b === 'closeorders') { sel = null; root.querySelector('#border').hidden = true; }
@@ -308,9 +320,9 @@ function bindInput() {
 }
 function tapAt(x, y) {
   const w = screenToWorld(x, y);
-  if (targeting) { B.fireAttack(0, w.x, w.y); targeting = false; return; }
+  if (targeting) { B.fireAttack(mySide, w.x, w.y); targeting = false; return; }
   let best = null, bd = (40 / cam.z) ** 2 + 600;
-  for (const d of B.divisions) { if (d.side !== 0 || B.aliveCount(d) <= 0) continue; for (const s of d.soldiers) { if (!s.alive || s.fled) continue; const dd = (s.x - w.x) ** 2 + (s.y - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } } }
+  for (const d of B.divisions) { if (d.side !== mySide || B.aliveCount(d) <= 0 || B.sides[mySide].ai) continue; for (const s of d.soldiers) { if (!s.alive || s.fled) continue; const dd = (s.x - w.x) ** 2 + (s.y - w.y) ** 2; if (dd < bd) { bd = dd; best = d; } } }
   if (best) openOrders(best); else if (sel) { sel = null; root.querySelector('#border').hidden = true; }
 }
 function skipToEnd() { let n = 0; while (!B.over && n++ < 40000) B.step(1 / 30); }

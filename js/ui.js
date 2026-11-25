@@ -1,66 +1,116 @@
 import { World, SIZES, TROOP_TIERS } from './sim.js';
 import { cultureById } from './names.js';
-import { renderBattleSetup, handleBattleSetupClick, watchBattle } from './battleview.js';
+import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle } from './battleview.js';
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
+import { renderYou, renderCreation, readForm, handleFormClick } from './you.js';
 
 const $ = s => document.querySelector(s);
 const view = $('#view');
-const SAVE_KEY = 'dynasty.save.v1';
-const BIOME_COLORS = { water: '#1d3a52', plains: '#6f8a45', forest: '#355f33', swamp: '#4b5e45', wasteland: '#a08350', tundra: '#c9d3d6', mountain: '#6e6a66' };
-const TYPE_LABELS = { war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
+const SAVE_KEY = 'dynasty.save.v2';
+const HISTORY_YEARS = 30;
+const TYPE_LABELS = { you: 'You', war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
-let world, playing = false, busy = false, tab = 'chronicle', watchMode = 'big';
+let world, playing = false, busy = false, tab = 'you', watchMode = 'big', creatingLife = false;
 const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null };
 
-// ---------- save / load (the sim is deterministic, so a seed + month count rebuilds the world) ----------
-function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: world.seed, size: world.size, months: (world.year - 1) * 12 + world.month, watched: world.watchedList || [], watchMode })); } catch (e) { /* storage unavailable */ } }
+// ---------- save / load ----------
+// The sim is deterministic: a seed, your actions and your battle choices rebuild the world exactly.
+function save() {
+  if (!world) return;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ seed: world.seed, size: world.size, monthIndex: world.monthIndex, actions: world.actions, battleLog: world.battleLog, watchMode })); } catch (e) { /* storage unavailable */ }
+}
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; } }
-
 function randomSeed() { const w = ['ember', 'raven', 'thorn', 'gold', 'ash', 'storm', 'iron', 'moon', 'wolf', 'crown', 'frost', 'oak']; return w[Math.floor(Math.random() * w.length)] + '-' + Math.floor(Math.random() * 9000 + 1000); }
 
-async function newWorld(seed, size, months = 0, watched = []) {
+function toast(text, kind = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = text;
+  document.body.appendChild(t); setTimeout(() => t.classList.add('out'), 3600); setTimeout(() => t.remove(), 4200);
+}
+
+async function rebuild(saved) {
   playing = false; setPlayBtn();
-  world = new World(seed, size);
-  setWorld(world);
-  // rebuild the saved world: battles you watched are re-fought exactly as you saw them
-  world.replayWatched = new Set(watched); world.watchedList = [...watched];
-  if (months > 0) await advance(months, true);
-  world.replayWatched = null; world.watchMode = watchMode === 'off' ? null : watchMode;
-  ui.shown = 60; ui.mapSel = null;
-  save(); render();
+  world = new World(saved.seed, saved.size); setWorld(world);
+  world.replaying = true; world.replayLog = saved.battleLog || {}; world.actions = (saved.actions || []).slice();
+  const acts = saved.actions || []; let k = 0;
+  await runMonths(saved.monthIndex, { quiet: true, label: 'Rebuilding your world', before: () => { while (k < acts.length && acts[k].m === world.monthIndex) { world.act(acts[k].a); k++; } } });
+  while (k < acts.length && acts[k].m === world.monthIndex) { world.act(acts[k].a); k++; }
+  world.replaying = false; world.replayLog = null; world.battleLog = saved.battleLog || {};
+  world.watchMode = watchMode === 'off' ? null : watchMode;
+}
+async function newGame(f) {
+  playing = false; setPlayBtn();
+  view.innerHTML = `<div class="empty">A world is being born.<br>Kingdoms rise, wars are fought, dynasties begin.<br>Thirty years of history are being written before you arrive.</div>`; window.scrollTo(0, 0);
+  world = new World(f.seed || randomSeed(), f.size); setWorld(world);
+  world.watchMode = null;
+  await runMonths(HISTORY_YEARS * 12, { quiet: true, label: 'Thirty years of history unfold' });
+  world.watchMode = watchMode === 'off' ? null : watchMode;
+  const msg = world.act({ type: 'start', origin: f.origin, culture: f.culture, name: f.name, female: f.female, mode: f.mode });
+  save(); tab = 'you'; selectTab(); render(); toast(msg);
 }
 
 // ---------- time ----------
-function advance(months, replaying = false) {
+function playerEvent(from) {
+  // something that happened to you (or your realm, as its ruler) in the entries since `from`
+  const pid = world.playerId; if (!pid) return null;
+  for (let i = from; i < world.chronicle.length; i++) { const e = world.chronicle[i]; if (e.type === 'you' || (e.importance >= 2 && e.ids.includes(pid))) return e; }
+  if (world.gameOver) return { text: 'Your line has ended.' };
+  return null;
+}
+function runMonths(months, opts = {}) {
   return new Promise(resolve => {
     busy = true; setBusy(true);
-    let done = 0; const chunk = 3;
-    const bar = $('#progressBar'); $('#progress').hidden = months < 24;
+    let done = 0;
+    const bar = $('#progressBar'); $('#progress').hidden = months < 12; $('#progressLabel').textContent = opts.label || '';
     const step = async () => {
-      const n = Math.min(chunk, months - done);
-      for (let i = 0; i < n; i++) {
+      let stop = null;
+      for (let i = 0; i < 3 && done < months; i++) {
+        opts.before && opts.before();
+        const from = world.chronicle.length;
         world.tick(); done++;
-        if (world.pendingBattle && !replaying) { $('#progress').hidden = true; await watchPending(); $('#progress').hidden = months < 24; }
+        if (world.pendingBattle && !opts.quiet) { $('#progress').hidden = true; await resolvePending(); $('#progress').hidden = months < 12; }
+        if (!opts.quiet) { const e = playerEvent(from); if (e) { stop = e; break; } }
       }
       bar.style.width = (done / months * 100) + '%';
       updateHeader();
-      if (done < months) setTimeout(step, 0);
-      else { busy = false; setBusy(false); $('#progress').hidden = true; save(); render(); resolve(); }
+      if (done < months && !stop) setTimeout(step, 0);
+      else { busy = false; setBusy(false); $('#progress').hidden = true; save(); render(); if (stop) toast(stop.text, 'you'); resolve(); }
     };
     step();
   });
 }
-function watchPending() {
+function resolvePending() {
   const ctx = world.pendingBattle;
-  const info = { title: `Battle of ${ctx.target.name}: ${ctx.att.name} attacks ${ctx.def.name}` };
-  return new Promise(res => watchBattle(ctx.cfg, info, b => { world.finishWatched(b); save(); render(); res(); }));
+  const info = { title: ctx.title || 'A battle' };
+  if (ctx.playerSide == null) return new Promise(res => watchBattle(ctx.cfg, info, b => { world.finishPending(b, { mode: 'watch' }); save(); render(); res(); }));
+  return new Promise(res => {
+    const mine = ctx.cfg.sides[ctx.playerSide], theirs = ctx.cfg.sides[1 - ctx.playerSide];
+    const count = s => s.divisions.reduce((a, d) => a + d.count, 0);
+    openSheet(`<h2>⚔ ${esc(info.title)}</h2>
+      <div class="sub">${esc(ctx.cfg.season)} · ${esc(ctx.cfg.terrain)}</div>
+      <div class="kv"><div><b>${count(mine).toLocaleString()}</b><small>Your side</small></div><div><b>${count(theirs).toLocaleString()}</b><small>The enemy</small></div><div><b>${mine.divisions.length} v ${theirs.divisions.length}</b><small>Divisions</small></div></div>
+      <button class="btn" data-bc="command">Command the battle</button>
+      <button class="btn ghost" data-bc="watch">Let your generals fight, and watch</button>
+      <button class="btn ghost" data-bc="quick">Resolve it quickly</button>
+      <p class="note">Whatever you choose is remembered, so your world rebuilds exactly as it happened.</p>`, true);
+    pendingChoice = mode => {
+      closeSheet();
+      if (mode === 'quick') { world.finishPending(null, { mode: 'quick' }); save(); render(); res(); return; }
+      if (mode === 'watch') { watchBattle(ctx.cfg, info, b => { world.finishPending(b, { mode: 'watch' }); save(); render(); res(); }); return; }
+      commandBattle(world.commandCfg(ctx), info, ctx.playerSide, b => { world.finishPending(b, { mode: 'command', script: b.recorded }); save(); render(); res(); });
+    };
+  });
 }
+let pendingChoice = null;
 let lastTick = 0, lastCount = 0;
 function loop(t) {
-  if (playing && !busy && t - lastTick > 220) {
-    lastTick = t; world.tick(); updateHeader();
-    if (world.pendingBattle) { busy = true; watchPending().then(() => { busy = false; lastTick = performance.now(); }); }
-    const n = world.chronicle.filter(e => e.importance >= ui.level).length;
+  if (playing && !busy && world && t - lastTick > 220) {
+    lastTick = t;
+    const from = world.chronicle.length;
+    world.tick(); updateHeader();
+    if (world.pendingBattle) { busy = true; resolvePending().then(() => { busy = false; lastTick = performance.now(); }); }
+    const e = playerEvent(from);
+    if (e) { playing = false; setPlayBtn(); save(); toast(e.text, 'you'); render(); }
+    const n = world.chronicle.filter(x => x.importance >= ui.level).length;
     if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || world.month === 0) { lastCount = n; render(true); }
     if (world.month === 0) save();
   }
@@ -68,7 +118,8 @@ function loop(t) {
 }
 function setPlayBtn() { const b = $('#btnPlay'); b.textContent = playing ? '❚❚' : '▶'; b.setAttribute('aria-label', playing ? 'Pause' : 'Play'); }
 function setBusy(on) { for (const id of ['#btnPlay', '#btnYear', '#btnTen', '#btnHundred', '#btnWorld']) $(id).disabled = on; }
-function updateHeader() { $('#date').textContent = world.dateLabel(); $('#season').textContent = world.season; }
+function updateHeader() { if (!world) return; $('#date').textContent = world.dateLabel(); $('#season').textContent = world.season; }
+function selectTab() { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); }
 
 // ---------- helpers ----------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -94,9 +145,11 @@ function titleTags(c) {
 // ---------- views ----------
 function render(soft = false) {
   updateHeader();
+  if (!world) { if (tab === 'you') renderCreation(view, null, false); return; }
   if (soft && tab !== 'map' && tab !== 'chronicle') return;
-  if (tab === 'chronicle') renderChronicle();
-  else if (tab === 'map') { if (!soft) mountMap(view, world, { realm: realmSheet, char: charSheet }); else refreshCard(); }
+  if (tab === 'you') { if (creatingLife) renderCreation(view, world, true); else renderYou(view, world); }
+  else if (tab === 'chronicle') renderChronicle();
+  else if (tab === 'map') { if (!soft) mountMap(view, world, { realm: realmSheet, char: charSheet, act: doAct }); else refreshCard(); }
   else if (tab === 'realms') renderRealms();
   else if (tab === 'people') renderPeople();
   else if (tab === 'stats') renderStats();
@@ -115,7 +168,7 @@ function renderChronicle() {
   for (const e of entries) {
     if (e.y !== lastY) { html += `<div class="year">Year ${e.y}</div>`; lastY = e.y; }
     const people = e.ids.slice(0, 4).map(id => charPill(world.char(id))).join('');
-    html += `<div class="entry i${e.importance}"><div class="meta">${e.watched ? '👁 Watched · ' : ''}${TYPE_LABELS[e.type] || 'The world'} · ${['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'][e.m]}</div>${esc(e.text)}${people ? `<div class="who">${people}</div>` : ''}</div>`;
+    html += `<div class="entry i${e.importance} ${e.type === 'you' || (world.playerId && e.ids.includes(world.playerId)) ? 'you' : ''}"><div class="meta">${e.watched ? '👁 Watched · ' : ''}${TYPE_LABELS[e.type] || 'The world'} · ${['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'][e.m]}</div>${esc(e.text)}${people ? `<div class="who">${people}</div>` : ''}</div>`;
   }
   if (total > ui.shown) html += `<button class="more" id="moreBtn">Show older (${total - ui.shown} more)</button>`;
   view.innerHTML = html;
@@ -247,11 +300,12 @@ function renderStats() {
     for (const c of titled.sort((a, b) => b.fame - a.fame).slice(0, 30)) html += `<div style="margin:6px 0">${charPill(c)} ${titleTags(c)}</div>`;
     html += `</div>`;
   }
+  html += `<h2 class="sec">Practice</h2><div class="card"><div class="sub">Fight a standalone battle with any culture's troops, outside your world.</div><button class="btn ghost" data-sandbox>Open the battle sandbox</button></div>`;
   view.innerHTML = html;
 }
 
 // ---------- detail sheets ----------
-function openSheet(html) { $('#sheet').innerHTML = `<div class="grab"></div><button class="close" data-close>✕</button>` + html; $('#sheetWrap').hidden = false; $('#sheet').scrollTop = 0; }
+function openSheet(html, locked = false) { $('#sheet').innerHTML = `<div class="grab"></div>${locked ? '' : '<button class="close" data-close>✕</button>'}` + html; $('#sheetWrap').hidden = false; $('#sheetWrap').dataset.locked = locked ? '1' : ''; $('#sheet').scrollTop = 0; }
 function closeSheet() { $('#sheetWrap').hidden = true; }
 
 function charSheet(id) {
@@ -324,14 +378,11 @@ function worldSheet() {
     <h2>Worlds</h2>
     <div class="sub">Every world grows from a seed. Share a seed and someone else gets the same starting world, but history will unfold differently once you play.</div>
     <div class="card" style="margin-top:12px"><b>Current world</b><div class="sub">Seed “${esc(world.seed)}” · ${SIZES[world.size].label} · Year ${world.year}</div></div>
-    <label class="field"><span>Seed</span><input id="seedIn" value="${esc(randomSeed())}" autocomplete="off"></label>
-    <label class="field"><span>Map size</span><select id="sizeIn">${Object.entries(SIZES).map(([k, v]) => `<option value="${k}" ${k === world.size ? 'selected' : ''}>${v.label} (${v.setts} settlements)</option>`).join('')}</select></label>
-    <button class="btn" id="createWorld">Create new world</button>
+    <button class="btn" id="createWorld">Start over in a new world</button>
     <label class="field"><span>Watch battles as they happen</span></label>
     <div class="chips">${[['off', 'Never'], ['big', 'Big battles'], ['all', 'Every battle']].map(([k, l]) => `<button class="chip ${watchMode === k ? 'on' : ''}" data-watch="${k}">${l}</button>`).join('')}</div>
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
-    <button class="btn ghost" id="restartWorld">Restart this world from year 1</button>
-    <p class="note">Prototype 0.3: the world runs itself, and its wars are fought on the battle engine. Playing as your own character comes in later builds. Your world is saved on this device.</p>
+    <p class="note">Prototype 0.5: you live in the world now. Your world is saved on this device, and rebuilt exactly from its seed and your choices.</p>
   `);
 }
 
@@ -342,30 +393,42 @@ document.addEventListener('click', ev => {
   if (!t) return;
   if (tab === 'battle' && !t.dataset.tab && handleBattleSetupClick(t, view)) return;
   if (t.matches('[data-close]')) return closeSheet();
+  if (t.dataset.bc && pendingChoice) { const f = pendingChoice; pendingChoice = null; return f(t.dataset.bc); }
+  if (t.dataset.sandbox != null) { tab = 'battle'; return renderBattleSetup(view); }
+  if (handleFormClick(t)) return render();
+  if (t.dataset.y === 'begin') { const f = readForm(); return newGame(f); }
+  if (t.dataset.y === 'newlife') { if (world.gameOver && !creatingLife) { creatingLife = true; return render(); } const f = readForm(); creatingLife = false; const msg = world.act({ type: 'start', origin: f.origin, culture: f.culture, name: f.name, female: f.female, mode: f.mode }); save(); render(); return toast(msg); }
+  if (t.dataset.y === 'newworld') { world = null; creatingLife = false; tab = 'you'; selectTab(); return render(); }
+  if (t.dataset.y === 'successor') return doAct({ type: 'successor', id: +t.dataset.id });
+  if (t.dataset.act) { const a = JSON.parse(t.dataset.act); if (t.dataset.confirm && !window.confirm(t.dataset.confirm)) return; return doAct(a); }
   if (t.dataset.tab) { if (tab === 'map' && t.dataset.tab !== 'map') unmountMap(); tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
   if (t.dataset.type) { ui.type = t.dataset.type; ui.shown = 60; return renderChronicle(); }
   if (t.id === 'moreBtn') { ui.shown += 80; return renderChronicle(); }
   if (t.dataset.char) return charSheet(+t.dataset.char);
   if (t.dataset.realm) return realmSheet(+t.dataset.realm);
-  if (t.id === 'createWorld') { const seed = $('#seedIn').value.trim() || randomSeed(); const size = $('#sizeIn').value; closeSheet(); return newWorld(seed, size); }
-  if (t.id === 'restartWorld') { closeSheet(); return newWorld(world.seed, world.size); }
+  if (t.id === 'createWorld') { if (!window.confirm('Leave this world and start over?')) return; closeSheet(); world = null; creatingLife = false; if (tab === 'map') unmountMap(); tab = 'you'; selectTab(); return render(); }
   if (t.dataset.watch) { watchMode = t.dataset.watch; world.watchMode = watchMode === 'off' ? null : watchMode; save(); return worldSheet(); }
 });
-$('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap') closeSheet(); });
-$('#btnPlay').onclick = () => { if (busy) return; playing = !playing; setPlayBtn(); };
-$('#btnYear').onclick = () => !busy && advance(12);
-$('#btnTen').onclick = () => !busy && advance(120);
-$('#btnHundred').onclick = () => !busy && advance(1200);
-$('#btnWorld').onclick = () => !busy && worldSheet();
+$('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap' && !$('#sheetWrap').dataset.locked) closeSheet(); });
+const ready = () => world && world.playerId && !busy;
+$('#btnPlay').onclick = () => { if (!ready()) return; playing = !playing; setPlayBtn(); };
+$('#btnYear').onclick = () => ready() && runMonths(12);
+$('#btnTen').onclick = () => ready() && runMonths(120);
+$('#btnHundred').onclick = () => ready() && runMonths(1200);
+$('#btnWorld').onclick = () => !busy && world && worldSheet();
+function doAct(a) {
+  const msg = world.act(a); save(); render(tab === 'map'); if (tab === 'map') refreshCard(); if (msg) toast(msg);
+}
 
 // ---------- start ----------
 window.dynasty = () => world; window.dynastyCam = debugCam; // handy for debugging from the console
 (async () => {
+  selectTab();
   const saved = load();
   if (saved && saved.watchMode) watchMode = saved.watchMode;
-  if (saved && SIZES[saved.size]) await newWorld(saved.seed, saved.size, saved.months, saved.watched || []);
-  else await newWorld(randomSeed(), 'large');
+  if (saved && SIZES[saved.size] && saved.actions && saved.actions.length) { await rebuild(saved); render(); }
+  else render();
   requestAnimationFrame(loop);
 })();
 

@@ -58,6 +58,7 @@ export class World {
     this.mercs = [];
     this.chronicle = [];
     this.unique = { strongest: null };
+    this.playerId = null; this.actions = []; this.line = []; this.plots = []; this.gameOver = null; this.mode = 'ironman'; this.spared = false; this.battleLog = {}; this.replayLog = null; this.replaying = false;
     this.stats = { battles: 0, wars: 0, uprisings: 0, assassinations: 0, foiled: 0, duels: 0, famines: 0, outbreaks: 0, destroyed: 0, realmsFallen: 0, realmsRisen: 0, marriages: 0, births: 0, deaths: 0, tournaments: 0, defections: 0, spies: 0 };
     this.generate();
   }
@@ -253,6 +254,11 @@ export class World {
     const fit = units.filter(u => pref.includes(u.role));
     return this.pick(fit.length ? fit : units).i;
   }
+  pickUnitView(c, faction = c.culture) {
+    const units = UNITS[faction].map((u, i) => ({ ...u, i })).filter(u => u.entry);
+    const s = c.stats; const pref = s.lea >= s.mig && s.lea >= s.int ? ['cav', 'flyer'] : s.int > s.mig ? ['ranged', 'magic'] : ['inf', 'heavy'];
+    return (units.find(u => pref.includes(u.role)) || units[0]).i;
+  }
   unitName(a) { return a && a.faction && UNITS[a.faction][a.unit] ? UNITS[a.faction][a.unit].name : 'troops'; }
   plural(n) {
     if (/Shaman$/.test(n)) return n + 's';
@@ -307,13 +313,14 @@ export class World {
     this.outlaws();
     this.warfare();
     this.intrigue();
+    this.playerTick();
     this.monthlyLife();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
     if (this.pendingBattle && this.pendingBattle.replay) {
-      // a battle the player watched: fight it again, step for step, so the world stays the same
-      const b = new Battle(this.pendingBattle.cfg); let n = 0; while (!b.over && n++ < 40000) b.step(1 / 30);
-      const ctx = this.pendingBattle; this.pendingBattle = null; ctx.watched = true; this.applyBattle(ctx, b);
+      // a battle you watched or fought: fight it again, step for step, so the world stays the same
+      const ctx = this.pendingBattle; this.pendingBattle = null;
+      this.finishBattle(ctx, this.runChoice(ctx, ctx.choice), ctx.choice);
     }
   }
   runYears(n) { for (let i = 0; i < n * 12; i++) this.tick(); }
@@ -340,20 +347,20 @@ export class World {
         s.pop = Math.max(20, Math.round(s.pop * 0.985)); s.unrest += 2; s.food = Math.max(s.food, -s.pop * 0.1);
       } else if (s.famine && s.food > s.pop * 0.05) { s.famine = false; s.aided = false; }
       else if (s.food > 0) s.pop = Math.round(s.pop * (1 + 0.0015 * (s.biome === 'plains' ? 1.3 : 1)));
-      if (r) r.treasury += s.pop * 0.004 * (1 + (this.char(r.rulerId)?.stats.pol || 5) / 20) - GUARD[s.guard].cost * 0.2;
+      if (r) r.treasury += s.pop * 0.004 * (1 + (this.char(r.rulerId)?.stats.pol || 5) / 20) * (r.tax === 'low' ? 0.6 : r.tax === 'high' ? 1.5 : 1) - GUARD[s.guard].cost * 0.2;
     }
     // Food aid to starving neighbours
     if (this.month % 2 === 0) {
       for (const s of this.setts.filter(s => s.famine && !s.destroyed)) {
         const donors = this.realmList().filter(r => r.id !== s.realmId && r.treasury > 80 && this.realmSetts(r).some(x => this.dist(x, s) < 8));
         for (const r of this.shuffle(donors)) {
-          const ruler = this.char(r.rulerId); if (!ruler || this.has(ruler, 'greedy') || this.has(ruler, 'cruel')) continue;
+          const ruler = this.char(r.rulerId); if (!ruler || this.isPlayer(ruler) || this.has(ruler, 'greedy') || this.has(ruler, 'cruel')) continue;
           if (s.aided || !this.chance(this.has(ruler, 'kind') ? 0.3 : 0.08)) continue;
           s.aided = true;
           r.treasury -= 40; s.food += s.pop * 0.12; s.famine = false; s.unrest = Math.max(0, s.unrest - 20);
           ruler.aid++; ruler.fame += 3; r.aidGiven++;
           const owner = this.realm(s.realmId);
-          if (owner && owner.setts.size === 1 && this.chance(0.45)) {
+          if (owner && owner.setts.size === 1 && !this.isPlayer(this.char(owner.rulerId)) && this.chance(0.45)) {
             const oldRuler = this.char(owner.rulerId);
             this.log(2, 'aid', `${this.rulerTitle(r, ruler)} ${this.fullName(ruler)} of ${r.name} sends grain to starving ${s.name}. Grateful, the village pledges itself to ${r.name}.`, [ruler.id, oldRuler?.id].filter(Boolean));
             this.annexVillage(owner, r);
@@ -397,6 +404,7 @@ export class World {
         const d = cap ? this.dist(s, cap) : 0;
         let du = -0.8 + over * 0.08 * (1 + d / 20) + GUARD[s.guard].unrest;
         if (s.culture !== r.culture) du += 0.25;
+        if (r.tax === 'low') du -= 0.25; else if (r.tax === 'high') du += 0.35;
         if (ruler && this.has(ruler, 'cruel')) du += 0.2;
         if (ruler && this.has(ruler, 'kind')) du -= 0.2;
         if (r.treasury < 0) du += 0.5;
@@ -408,7 +416,7 @@ export class World {
 
   uprising(s, r, overextended) {
     this.stats.uprisings++;
-    let leader = this.living().find(c => (c.role === 'vagabond' || c.role === 'bandit') && this.dist(c, s) < 5 && c.fame > 8);
+    let leader = this.living().find(c => (c.role === 'vagabond' || c.role === 'bandit') && !this.isPlayer(c) && !c.companionOf && this.dist(c, s) < 5 && c.fame > 8);
     if (!leader) leader = this.makeChar({ culture: s.culture, age: this.ri(22, 45), role: 'rebel' });
     const cause = s.famine ? 'hunger' : overextended ? 'neglect from a distant crown' : 'heavy taxes and harsh rule';
     const ruler = this.char(r.rulerId);
@@ -457,7 +465,7 @@ export class World {
       }
       // Heroes answer the call
       if (L.strength > 25 && this.chance(L.strength > 50 ? 0.06 : 0.03)) {
-        const heroes = this.living().filter(c => ['vagabond', 'officer', 'merc'].includes(c.role) && !c.prisonerOf && this.age(c) >= 17 && this.dist(c, L) < 14 && c.stats.mig + c.stats.int > 12);
+        const heroes = this.living().filter(c => ['vagabond', 'officer', 'merc'].includes(c.role) && !this.isPlayer(c) && !c.companionOf && !c.prisonerOf && this.age(c) >= 17 && this.dist(c, L) < 14 && c.stats.mig + c.stats.int > 12);
         if (!heroes.length) continue;
         const h = this.pick(heroes);
         const skill = h.stats.mig * 1.4 + h.stats.int * 0.6 + (h.army ? Math.sqrt(h.army.size) : 4) + this.r() * 25;
@@ -500,6 +508,7 @@ export class World {
     for (const c of this.living()) {
       if (c.prisonerOf) continue;
       if (c.wounded > 0) c.wounded--;
+      if (this.isPlayer(c) || (c.companionOf && this.char(c.companionOf)?.alive && this.isPlayer(this.char(c.companionOf)))) continue;
       if (c.role === 'vagabond' || c.role === 'bandit') {
         // wander
         if (this.chance(0.3)) { const s = this.pick(this.setts.filter(s => !s.destroyed && this.dist(s, c) < 10) || this.setts); if (s) { c.x = s.x; c.y = s.y; c.settId = s.id; } }
@@ -551,7 +560,7 @@ export class World {
   warfare() {
     // declarations, checked monthly with low chance
     for (const r of this.shuffle(this.realmList())) {
-      const ruler = this.char(r.rulerId); if (!ruler || ruler.prisonerOf) continue;
+      const ruler = this.char(r.rulerId); if (!ruler || ruler.prisonerOf || this.isPlayer(ruler)) continue;
       if (this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id))) continue;
       const aggro = (this.has(ruler, 'ambitious') ? 2 : 1) * (this.has(ruler, 'content') ? 0.3 : 1) * (this.has(ruler, 'reckless') ? 1.5 : 1) * (this.has(ruler, 'cautious') ? 0.6 : 1);
       if (!this.chance(0.006 * aggro)) continue;
@@ -673,7 +682,7 @@ export class World {
     }
     for (const side of [aOff, dOff]) {
       for (const o of [...side]) {
-        if (o.role === 'ruler' || o.loyalty > 30 || !this.chance(0.15)) continue;
+        if (o.role === 'ruler' || this.isPlayer(o) || o.loyalty > 30 || !this.chance(0.15)) continue;
         const mine = side === aOff ? att : def, other = side === aOff ? def : att;
         side.splice(side.indexOf(o), 1); (side === aOff ? dOff : aOff).push(o);
         this.stats.defections++;
@@ -689,16 +698,45 @@ export class World {
     ctx.cfg = this.battleConfig(ctx, duelSide);
     const big = att.tier === 'Kingdom' || def.tier === 'Kingdom' || ctx.cfg.sides.reduce((a, s) => a + s.divisions.reduce((x, d) => x + d.count, 0), 0) > 1400;
     ctx.big = big;
-    if (this.replayWatched && this.replayWatched.has(ctx.index) && !this.pendingBattle) { ctx.replay = true; this.pendingBattle = ctx; return; }
-    if (!this.pendingBattle && this.watchMode && (this.watchMode === 'all' || (this.watchMode === 'big' && big))) { this.pendingBattle = ctx; return; }
+    ctx.title = `Battle of ${target.name}: ${att.name} attacks ${def.name}`;
+    const pid = this.playerId, pr = this.player && this.player.alive ? this.playerRealm() : null;
+    ctx.playerSide = aOff.some(o => o.id === pid) ? 0 : dOff.some(o => o.id === pid) ? 1 : (pr && this.playerRules() ? (pr.id === att.id ? 0 : pr.id === def.id ? 1 : null) : null);
+    if (ctx.playerSide == null) ctx.playerSide = undefined;
+    this.queueBattle(ctx);
+  }
+
+  queueBattle(ctx) {
+    const choice = this.replaying && this.replayLog ? this.replayLog[ctx.index] : null;
+    if (choice && !this.pendingBattle) { ctx.choice = choice; ctx.replay = true; this.pendingBattle = ctx; return; }
+    const wants = ctx.playerSide != null || (this.watchMode && (this.watchMode === 'all' || (this.watchMode === 'big' && ctx.big)));
+    if (!this.replaying && !this.pendingBattle && wants) { this.pendingBattle = ctx; return; }
+    this.finishBattle(ctx, this.runProxy(ctx.cfg), null);
+  }
+  runProxy(cfg) {
     // auto-resolve: the same engine with each soldier standing for a company of men
-    const proxy = JSON.parse(JSON.stringify(ctx.cfg));
+    const proxy = JSON.parse(JSON.stringify(cfg)); delete proxy.script;
     const biggest = Math.max(...proxy.sides.flatMap(s => s.divisions.map(d => d.count)));
     const per = Math.max(1, biggest / 18);
-    for (const side of proxy.sides) for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per));
+    for (const side of proxy.sides) { if (!side.ai) side.ai = 'balanced'; for (const d of side.divisions) d.count = Math.max(2, Math.round(d.count / per)); }
     const b = new Battle(proxy); let n = 0; while (!b.over && n++ < 1000) b.step(0.3);
     if (!b.over) { b.t = 999; b.checkEnd(); }
-    this.applyBattle(ctx, b);
+    return b;
+  }
+  commandCfg(ctx, script) {
+    const cfg = JSON.parse(JSON.stringify(ctx.cfg));
+    if (ctx.playerSide != null) cfg.sides[ctx.playerSide].ai = null;
+    if (script) cfg.script = script;
+    return cfg;
+  }
+  runChoice(ctx, choice) {
+    if (!choice || choice.mode === 'quick') return this.runProxy(ctx.cfg);
+    const b = new Battle(choice.mode === 'command' ? this.commandCfg(ctx, choice.script) : ctx.cfg);
+    let n = 0; while (!b.over && n++ < 40000) b.step(1 / 30);
+    return b;
+  }
+  finishBattle(ctx, b, choice) {
+    if (choice) { this.battleLog[ctx.index] = choice; ctx.watched = true; }
+    if (ctx.kind === 'skirmish') this.applySkirmish(ctx, b); else this.applyBattle(ctx, b);
   }
 
   battleConfig(ctx, duelSide) {
@@ -767,11 +805,12 @@ export class World {
     this.afterBattle(ctx, { attackerWon: wonSide === 0, decisive });
   }
 
-  finishWatched(b) {
+  // called by the screen once you've watched, fought or skipped a pending battle
+  finishPending(b, choice) {
     const ctx = this.pendingBattle; if (!ctx) return;
-    this.pendingBattle = null; ctx.watched = true;
-    if (!(this.watchedList || (this.watchedList = [])).includes(ctx.index)) this.watchedList.push(ctx.index);
-    this.applyBattle(ctx, b);
+    this.pendingBattle = null;
+    if (choice.mode === 'quick') b = this.runProxy(ctx.cfg);
+    this.finishBattle(ctx, b, choice);
   }
 
   officerFallen(o, realm) {
@@ -872,6 +911,7 @@ export class World {
   guardSetting(r) {
     // rulers who feel threatened tighten security
     const ruler = this.char(r.rulerId);
+    if (this.isPlayer(ruler)) { const g = r.guardChoice || 'Light'; const cap = this.sett(r.capital); if (cap) cap.guard = g; return g; }
     const threats = this.wars.filter(w => !w.over && (w.a === r.id || w.b === r.id)).length + (ruler && ruler.plotted ? 1 : 0);
     const g = threats >= 2 || (ruler && this.has(ruler, 'cautious') && threats) ? 'Locked Down' : threats ? 'Watchful' : 'Light';
     const cap = this.sett(r.capital); if (cap) cap.guard = g;
@@ -907,7 +947,7 @@ export class World {
     }
     // assassination plots: ambitious claimants and bitter enemies
     if (this.chance(0.12)) {
-      const plotters = this.living().filter(c => !c.prisonerOf && this.age(c) >= 18 && (this.has(c, 'ambitious') || this.has(c, 'deceitful')) && c.stats.int >= 8);
+      const plotters = this.living().filter(c => !c.prisonerOf && !this.isPlayer(c) && this.age(c) >= 18 && (this.has(c, 'ambitious') || this.has(c, 'deceitful')) && c.stats.int >= 8);
       const p = plotters.length ? this.pick(plotters) : null;
       if (p) {
         let target = null, motive = '';
@@ -921,7 +961,7 @@ export class World {
             if (war) { const er = this.realm(war.a === myRealm.id ? war.b : war.a); const heir = er && this.char(er.heirId); target = heir && heir.alive && this.chance(0.5) ? heir : er && this.char(er.rulerId); motive = target && target.id === er?.heirId ? 'to end the enemy line' : 'to win the war'; }
           }
         }
-        if (target && target.alive && target.id !== p.id) this.assassination(p, target, motive);
+        if (target && target.alive && target.id !== p.id) { if (this.isPlayer(target)) this.plotAgainstPlayer(p, motive); else this.assassination(p, target, motive); }
       }
     }
   }
@@ -961,7 +1001,9 @@ export class World {
   // ---------- tournaments ----------
   tournaments() {
     for (const r of this.realmList()) {
-      if (r.tier === 'Village' || r.treasury < 150 || this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id)) || !this.chance(0.15)) continue;
+      const asked = r.hostTournament; r.hostTournament = false;
+      if (this.isPlayer(this.char(r.rulerId)) && !asked) continue;
+      if (!asked && (r.tier === 'Village' || r.treasury < 150 || this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id)) || !this.chance(0.15))) continue;
       const cap = this.sett(r.capital);
       const pool = this.living().filter(c => this.age(c) >= 17 && this.age(c) <= 50 && !c.prisonerOf && !c.wounded && ['officer', 'ruler', 'vagabond', 'courtier', 'merc'].includes(c.role) && this.dist(c, cap) < 15);
       const entrants = this.shuffle(pool).slice(0, 8);
@@ -979,7 +1021,8 @@ export class World {
       // assassins in the crowd, with framing
       if (this.chance(0.05) && ruler) {
         const enemies = entrants.filter(e => e.realmId !== r.id && e.alive);
-        const victim = this.chance(0.5) ? ruler : this.pick(entrants.filter(e => e.alive && e.role !== 'vagabond')) || ruler;
+        let victim = this.chance(0.5) ? ruler : this.pick(entrants.filter(e => e.alive && e.role !== 'vagabond')) || ruler;
+        if (this.isPlayer(victim)) victim = null;
         const framed = enemies.length ? this.pick(enemies) : null;
         if (victim && victim.alive && this.chance(1 - GUARD.Watchful.catch)) {
           this.die(victim, 'stabbed in the tournament crowd'); this.stats.assassinations++;
@@ -1002,6 +1045,7 @@ export class World {
       const a = this.age(c);
       let p = a < 5 ? 0.0012 : a < 50 ? 0.0006 : 0.0006 + (a - 50) ** 2 * 0.00004;
       if (c.wounded) p += 0.004;
+      if (this.isPlayer(c) && a < 50) p *= 0.3; // the chronicle is kind to its subject, early on
       if (this.chance(p)) { this.die(c, a > 60 ? 'old age' : this.pick(['a fever', 'the bloody flux', 'a fall from a horse', 'a winter chill'])); continue; }
       // births
       if (c.female && c.spouseId && a >= 17 && a <= 42) {
@@ -1034,8 +1078,8 @@ export class World {
         else c.role = 'vagabond';
         if (c.betrothed) { const b = this.char(c.betrothed); if (b && b.alive && !b.spouseId && this.age(b) >= 16) this.marry(c, b, false); }
       }
-      if (!c.spouseId && a >= 18 && a <= 45 && (c.noble || c.role === 'officer' || c.role === 'ruler') && this.chance(0.25)) this.seekMarriage(c);
-      if (c.role === 'officer') {
+      if (!c.spouseId && !this.isPlayer(c) && a >= 18 && a <= 45 && (c.noble || c.role === 'officer' || c.role === 'ruler') && this.chance(0.25)) this.seekMarriage(c);
+      if (c.role === 'officer' && !this.isPlayer(c)) {
         const r = this.realm(c.realmId); const ruler = r && this.char(r.rulerId);
         if (!r || !r.alive || !ruler) { c.role = 'vagabond'; continue; }
         c.loyalty += (this.op(c, ruler) > 20 ? 2 : -1) + (r.treasury < 0 ? -6 : 0) + (this.has(ruler, 'cruel') ? -3 : 0) + (this.has(c, 'loyal') ? 3 : 0) + (this.has(c, 'ambitious') ? -2 : 0);
@@ -1068,8 +1112,8 @@ export class World {
       }
       this.pickHeir(r);
       // village rulers with ambition try to unite neighbours
-      if (ruler && (this.has(ruler, 'ambitious') || ruler.fame > 30) && this.chance(0.12)) {
-        const near = this.neighbours(r, 6).filter(o => o.tier === 'Village' && o.setts.size === 1 && !this.atWar(r, o));
+      if (ruler && !this.isPlayer(ruler) && (this.has(ruler, 'ambitious') || ruler.fame > 30) && this.chance(0.12)) {
+        const near = this.neighbours(r, 6).filter(o => o.tier === 'Village' && o.setts.size === 1 && !this.atWar(r, o) && !this.isPlayer(this.char(o.rulerId)));
         const v = near.length ? this.pick(near) : null;
         if (v) {
           const vr = this.char(v.rulerId);
@@ -1088,7 +1132,7 @@ export class World {
     for (const s of this.setts) {
       if (s.destroyed) {
         if (this.chance(0.07)) {
-          const founder = this.living().find(c => (c.role === 'vagabond' || c.role === 'bandit') && this.dist(c, s) < 10) || this.makeChar({ culture: s.culture, age: this.ri(22, 45), role: 'vagabond' });
+          const founder = this.living().find(c => (c.role === 'vagabond' || c.role === 'bandit') && !this.isPlayer(c) && !c.companionOf && this.dist(c, s) < 10) || this.makeChar({ culture: s.culture, age: this.ri(22, 45), role: 'vagabond' });
           s.destroyed = false; s.pop = this.ri(80, 200); s.food = 40; s.unrest = 10; s.famine = false; s.realmId = null;
           const r = this.makeRealm(s, founder.id); founder.role = 'ruler'; founder.realmId = r.id; founder.settId = s.id;
           founder.dynasty = founder.dynasty || this.dynastyName(); r.dynasty = founder.dynasty; founder.army = this.newArmy(founder, 0.3); founder.fame += 5;
@@ -1156,6 +1200,7 @@ export class World {
 
   pickHeir(r) {
     const ruler = this.char(r.rulerId); if (!ruler) return;
+    if (this.isPlayer(ruler)) { const s = this.chosenSuccessor(ruler); for (const c of this.living()) if (c.heir === r.id) c.heir = null; r.heirId = s ? s.id : null; if (s) s.heir = r.id; return; }
     const kids = ruler.children.map(id => this.char(id)).filter(k => k && k.alive && !k.prisonerOf).sort((a, b) => a.born - b.born);
     const adultKids = kids.filter(k => this.age(k) >= 16);
     let heir = adultKids[0] || kids[0];
@@ -1215,6 +1260,11 @@ export class World {
 
   die(c, cause) {
     if (!c.alive) return;
+    if (this.isPlayer(c) && this.mode === 'casual' && !this.spared) {
+      this.spared = true; c.wounded = 12;
+      this.you(`You are struck down (${cause}), but against all odds you live. Casual mode spares you once; the next blow will be final.`, [], 3);
+      return;
+    }
     c.alive = false; c.died = this.year; c.cause = cause; this.stats.deaths++;
     if (c.spouseId) { const s = this.char(c.spouseId); if (s) s.spouseId = null; }
     if (this.unique.strongest === c.id) this.unique.strongest = null;
@@ -1226,6 +1276,7 @@ export class World {
       this.pickHeir(r);
     } else if (c.fame > 25 || c.titles.deed) this.log(2, 'death', `${this.fullName(c)} dies (${cause}).${c.titles.deed ? ` The ${c.titles.deed} passes into legend.` : ''}`, [c.id]);
     for (const b of c.oath) { const bb = this.char(b); if (bb && bb.alive) { this.opine(bb, c, 10); } }
+    if (this.isPlayer(c)) this.playerDied(c, cause);
     if (c.mercId) { const m = this.mercs.find(x => x.id === c.mercId); if (m) { const vets = this.living().filter(x => x.role === 'vagabond' && this.dist(x, c) < 8); const nc = vets[0] || this.makeChar({ culture: c.culture, age: this.ri(25, 40), role: 'merc' }); nc.role = 'merc'; nc.mercId = m.id; m.captainId = nc.id; } }
   }
 
@@ -1243,6 +1294,385 @@ export class World {
         else if (old === 'Kingdom') this.log(2, 'fall', `${r.name} has shrunk and is a kingdom no longer.`, []);
       }
     }
+  }
+
+  // =====================================================================
+  // THE PLAYER. Everything you do goes through act(), which is recorded so
+  // the world can be rebuilt exactly from its seed and your choices.
+  // =====================================================================
+  get monthIndex() { return (this.year - 1) * 12 + this.month; }
+  get player() { return this.playerId ? this.char(this.playerId) : null; }
+  isPlayer(c) { return !!c && c.id === this.playerId; }
+  playerRealm() { const p = this.player; const r = p && this.realm(p.realmId); return r && r.alive ? r : null; }
+  playerRules() { const p = this.player, r = this.playerRealm(); return !!(p && r && r.rulerId === p.id); }
+  you(text, ids = [], importance = 2) { this.log(importance, 'you', text, [this.playerId, ...ids].filter(Boolean)); }
+
+  act(a) {
+    if (!this.replaying) this.actions.push({ m: this.monthIndex, a });
+    const fn = this['act_' + a.type];
+    if (!fn) return 'Unknown action.';
+    if (a.type !== 'start' && (!this.player || !this.player.alive)) return 'You are no longer among the living.';
+    return fn.call(this, a) || '';
+  }
+
+  // ---------- starting a life ----------
+  act_start(a) {
+    this.gameOver = null; this.spared = false; this.mode = a.mode || 'ironman';
+    const cul = cultureById(a.culture) ? a.culture : this.pick(CULTURES).id;
+    const name = (a.name || '').trim().slice(0, 24) || null;
+    let c = null, where = '';
+    const ofCulture = list => { const m = list.filter(x => x.culture === cul); return m.length ? m : list; };
+    if (a.origin === 'headman' || a.origin === 'lord') {
+      const tier = a.origin === 'headman' ? 'Village' : 'Lordship';
+      let pool = ofCulture(this.realmList().filter(r => r.tier === tier && this.char(r.rulerId)));
+      if (!pool.length) pool = this.realmList().filter(r => this.char(r.rulerId));
+      const r = this.pick(pool); const old = this.char(r.rulerId);
+      c = this.makeChar({ culture: r.culture, age: this.ri(20, 28), role: 'ruler', dynasty: r.dynasty || this.dynastyName(), noble: true, female: a.female });
+      if (old) { const mom = old.spouseId ? this.char(old.spouseId) : null; if (mom) this.setParents(c, old, mom); else { c.parents = [old.id]; old.children.push(c.id); } }
+      c.realmId = r.id; c.settId = r.capital; r.rulerId = c.id; c.army = this.newArmy(c, r.tier === 'Village' ? 0.4 : 1);
+      const cap = this.sett(r.capital); c.x = cap.x; c.y = cap.y;
+      if (old && old.alive) { old.alive = false; old.died = this.year; old.cause = 'old age and a long illness'; }
+      where = `${this.rulerTitle(r, c)} of ${r.name}, inheriting from ${old ? old.name : 'your kin'}`;
+    } else if (a.origin === 'heir') {
+      const young = r => this.char(r.rulerId).children.map(id => this.char(id)).filter(k => k && k.alive).every(k => this.age(k) < 24);
+      let pool = ofCulture(this.realmList().filter(r => r.tier === 'Kingdom' && this.char(r.rulerId)));
+      if (!pool.length) pool = this.realmList().filter(r => r.tier !== 'Village' && this.char(r.rulerId));
+      if (pool.some(young)) pool = pool.filter(young);
+      const r = this.pick(pool); const king = this.char(r.rulerId);
+      const eldest = king.children.map(id => this.char(id)).filter(k => k && k.alive).reduce((m, k) => Math.max(m, this.age(k)), 17);
+      c = this.makeChar({ culture: r.culture, age: Math.min(Math.max(18, eldest + 1), Math.max(18, this.age(king) - 17)), role: 'officer', dynasty: king.dynasty || r.dynasty, noble: true, female: a.female });
+      const mom = king.spouseId ? this.char(king.spouseId) : null; if (mom) this.setParents(c, king, mom); else { c.parents = [king.id]; king.children.push(c.id); }
+      this.addOfficer(r, c); c.loyalty = 90; c.army = this.newArmy(c, 0.8); this.opine(king, c, 40);
+      const cap = this.sett(r.capital); c.x = cap.x; c.y = cap.y;
+      this.pickHeir(r);
+      where = `heir to ${this.rulerTitle(r, king)} ${king.name} of ${r.name}`;
+    } else {
+      const s = this.pick(ofCulture(this.setts.filter(s => !s.destroyed)));
+      c = this.makeChar({ culture: s.culture, age: this.ri(18, 24), role: 'vagabond', female: a.female });
+      c.settId = s.id; c.x = s.x; c.y = s.y; c.gold = 40; c.followers = 6;
+      const mates = this.living().filter(v => v.role === 'vagabond' && v.id !== c.id && this.dist(v, s) < 8 && !v.companionOf).slice(0, this.ri(1, 2));
+      for (const m of mates) { m.companionOf = c.id; this.opine(m, c, 40); this.opine(c, m, 40); }
+      where = `a landless wanderer at ${s.name}${mates.length ? `, with ${mates.map(m => m.name).join(' and ')} at your side` : ''}`;
+    }
+    if (name) c.name = name;
+    c.gold = c.gold || 0; c.followers = c.followers || 0;
+    c.stats.lea += 2; c.stats.mig += 2; c.stats.int += 2; c.stats.cha += 2; // the chronicle favours its subject, a little
+    this.playerId = c.id; this.line = [c.id];
+    this.you(`Your story begins. You are ${this.fullName(c)}, ${where}.`, [], 3);
+    return 'Your story begins.';
+  }
+
+  // ---------- successor ----------
+  kin(a, b) { return a.children.includes(b.id) || b.children.includes(a.id) || (a.parents.length && a.parents.some(p => b.parents.includes(p))); }
+  successorCandidates(c = this.player) {
+    if (!c) return [];
+    const set = new Map();
+    const add = (x, why) => { if (x && x.alive && x.id !== c.id && !set.has(x.id)) set.set(x.id, { c: x, why }); };
+    for (const id of c.children) add(this.char(id), 'child');
+    for (const id of c.oath) add(this.char(id), 'sworn sibling');
+    for (const x of this.living()) if (x.companionOf === c.id) add(x, 'companion');
+    const r = this.realm(c.realmId);
+    if (r && r.rulerId === c.id) for (const o of this.realmOfficers(r)) add(o, o.titles.rank || 'officer');
+    for (const x of this.living()) if (x.parents.length && c.parents.length && x.parents.some(p => c.parents.includes(p))) add(x, 'sibling');
+    return [...set.values()];
+  }
+  successorValid(c, s) {
+    if (!s || !s.alive || s.prisonerOf) return { ok: false, why: s ? (s.prisonerOf ? 'is a prisoner' : 'is dead') : 'none named' };
+    if (this.kin(c, s)) return { ok: true };
+    const o = this.op(s, c);
+    return o >= 20 ? { ok: true } : { ok: false, why: `does not trust you enough (opinion ${Math.round(o)}, needs 20)` };
+  }
+  chosenSuccessor(c = this.player) {
+    if (!c) return null;
+    if (c.successorId) { const s = this.char(c.successorId); if (s && s.alive) return s; }
+    const cands = this.successorCandidates(c);
+    const kids = cands.filter(x => x.why === 'child').map(x => x.c).sort((a, b) => a.born - b.born);
+    return kids[0] || cands.map(x => x.c)[0] || null;
+  }
+  act_successor(a) { const p = this.player, s = this.char(a.id); if (!s) return; p.successorId = s.id; this.you(`You name ${this.fullName(s)} as your successor.`, [s.id], 1); return `${s.name} will carry on your line.`; }
+
+  playerDied(c, cause) {
+    const s = this.chosenSuccessor(c); const v = this.successorValid(c, s);
+    if (s && v.ok) {
+      this.playerId = s.id; this.line.push(s.id); s.successorId = null;
+      if (c.gold) s.gold = (s.gold || 0) + c.gold;
+      if (c.role === 'vagabond' || c.followers) { s.followers = (s.followers || 0) + Math.round((c.followers || 0) * 0.7); }
+      for (const x of this.living()) if (x.companionOf === c.id && x.id !== s.id) x.companionOf = s.id;
+      if (!s.x && c.x) { s.x = c.x; s.y = c.y; s.settId = c.settId; }
+      this.you(`${this.fullName(c)} is dead (${cause}). The story continues with ${this.fullName(s)}.`, [c.id], 3);
+    } else {
+      this.gameOver = { year: this.year, month: this.month, name: this.fullName(c), cause, why: s ? `${s.name} ${v.why}` : 'there was no one to carry on' };
+      this.log(3, 'you', `${this.fullName(c)} is dead (${cause}), and ${this.gameOver.why}. Your line ends here, but the world goes on.`, [c.id]);
+    }
+  }
+
+  // ---------- each month: your journeys, plots and companions ----------
+  playerTick() {
+    const p = this.player; if (!p || !p.alive) return;
+    if (p.role === 'officer') p.gold = (p.gold || 0) + 2;
+    if (p.task && !p.prisonerOf) {
+      const t = p.task; const dest = t.lair ? this.lairs.find(l => l.id === t.lair) : t.bandit ? this.char(t.bandit) : this.sett(t.to);
+      if (!dest || (t.bandit && !dest.alive) || (t.lair && !dest.alive)) { p.task = null; this.you(`Your quarry is gone before you arrive.`, [], 1); }
+      else {
+        const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
+        let sp = this.season === 'Winter' ? 1.8 : 3.4; if (g === 'swamp' || g === 'mountain') sp *= 0.6;
+        const d = Math.hypot(dest.x - p.x, dest.y - p.y);
+        if (d > sp) {
+          p.x += (dest.x - p.x) / d * sp; p.y += (dest.y - p.y) / d * sp;
+          const b = this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
+          if (b && !t.bandit && this.chance(0.06)) { p.task = null; this.you(`Bandits under ${this.fullName(b)} ambush you on the road!`, [b.id], 2); this.skirmish(b, true); }
+        } else {
+          p.x = dest.x; p.y = dest.y; p.task = null;
+          if (t.bandit) this.skirmish(dest, false);
+          else if (t.lair) this.huntResolve(dest, t.approach);
+          else { p.settId = dest.id; this.you(`You arrive at ${dest.name}.`, [], 1); }
+        }
+      }
+    }
+    for (const x of this.living()) if (x.companionOf === p.id) { x.x = p.x; x.y = p.y; x.settId = p.settId; if (p.realmId && x.realmId !== p.realmId && p.role !== 'vagabond') { x.realmId = p.realmId; if (x.role === 'vagabond') this.addOfficer(this.realm(p.realmId), x); } }
+    // plots against you
+    for (const plot of [...(this.plots || [])]) {
+      if (this.monthIndex < plot.due) continue;
+      this.plots.splice(this.plots.indexOf(plot), 1);
+      const plotter = this.char(plot.by);
+      if (!p.alive || !plotter || !plotter.alive) continue;
+      if (plot.settId && p.settId !== plot.settId && p.role === 'vagabond') { this.you(`An assassin sent after you loses your trail.`, [], 2); continue; }
+      const r = this.playerRealm();
+      const guard = r && this.playerRules() ? (r.guardChoice || 'Light') : 'Light';
+      let catchP = GUARD[guard].catch + (plot.warned ? 0.15 : 0) + (r ? (this.spymaster(r)?.stats.int || 0) * 0.01 : p.stats.int * 0.01) - plotter.stats.int * 0.01;
+      if (p.role === 'vagabond') catchP += (this.living().filter(x => x.companionOf === p.id).length) * 0.08;
+      if (this.chance(Math.max(0.12, Math.min(0.9, catchP)))) {
+        this.stats.foiled++; this.opine(p, plotter, -70);
+        this.you(`An assassin disguised as ${plot.disguise} is caught before reaching you. Under questioning they name ${this.fullName(plotter)}.`, [plotter.id], 3);
+      } else {
+        this.stats.assassinations++;
+        this.die(p, `assassinated by an agent of ${plotter.name}`);
+      }
+    }
+  }
+  plotAgainstPlayer(plotter, motive) {
+    const p = this.player; if (!p || (this.plots || []).some(x => x.by === plotter.id)) return;
+    const r = this.playerRealm();
+    const sm = r ? this.spymaster(r) : null;
+    const sense = (sm ? sm.stats.int : p.stats.int) + this.living().filter(x => x.companionOf === p.id).length * 2;
+    const warned = this.chance(Math.min(0.9, 0.15 + sense * 0.035));
+    const plot = { by: plotter.id, due: this.monthIndex + this.ri(2, 5), warned, disguise: this.pick(['a merchant', 'a pilgrim', 'a performer', 'a cook', 'a priest', 'a fellow traveler']), settId: p.settId };
+    (this.plots || (this.plots = [])).push(plot);
+    if (warned) this.you(`${sm && sm.id !== p.id ? `Your spymaster ${sm.name} hears` : 'You hear'} whispers of a plot against your life${sense > 14 ? `. The trail leads to ${this.fullName(plotter)}` : ''}. ${this.playerRules() ? 'Tightening the guard may save you.' : 'Moving on may save you.'}`, sense > 14 ? [plotter.id] : [], 3);
+  }
+
+  // ---------- vagabond life ----------
+  act_travel(a) {
+    const p = this.player, s = this.sett(a.to); if (!s || p.role !== 'vagabond') return 'Only a wanderer can take to the road like this.';
+    p.task = { type: 'travel', to: s.id };
+    return `You set out for ${s.name}. About ${Math.max(1, Math.ceil(this.dist(p, s) / 3.4))} month(s) on the road.`;
+  }
+  contractsHere() {
+    const p = this.player; if (!p) return [];
+    const out = [];
+    for (const b of this.living()) if (b.role === 'bandit' && this.dist(b, p) < 9) out.push({ kind: 'bandit', id: b.id, label: `Hunt the bandit ${this.fullName(b)} (${b.band} cutthroats)`, reward: 20 + b.band, odds: this.banditOdds(b), dist: this.dist(b, p) });
+    for (const L of this.lairs) if (L.alive && L.strength > 18 && this.dist(L, p) < 11) out.push({ kind: 'lair', id: L.id, label: `Clear the lair of ${MON[L.key].the}`, reward: Math.round(30 + L.strength * L.base), lair: L, dist: this.dist(L, p) });
+    return out.sort((a, b) => a.dist - b.dist).slice(0, 6);
+  }
+  playerForce() { const p = this.player; return (p.followers || 0) * 1 + this.living().filter(x => x.companionOf === p.id).length * 4 + p.stats.mig * 0.6 + p.stats.lea * 0.4; }
+  banditOdds(b) { const r = this.playerForce() / Math.max(1, b.band * 0.9 + b.stats.mig * 0.5); return Math.max(0.03, Math.min(0.97, r * r / (1 + r * r))); }
+  huntOdds(L, approach) {
+    const p = this.player; const M = MON[L.key];
+    const stat = approach === 'tame' ? p.stats.cha : approach === 'trap' ? p.stats.int : p.stats.mig;
+    const skill = stat * 1.6 + (p.followers || 0) * 0.5 + this.living().filter(x => x.companionOf === p.id).length * 3 + 12;
+    const threat = L.strength * L.base * 0.35 + 10 + (approach === 'slay' ? 0 : 4);
+    const r = skill / threat; return Math.max(0.03, Math.min(0.95, r * r / (1 + r * r)));
+  }
+  act_contract(a) {
+    const p = this.player;
+    if (a.kind === 'bandit') { const b = this.char(a.id); if (!b || !b.alive) return 'They are gone.'; p.task = { type: 'contract', bandit: b.id }; this.you(`You take coin to hunt the bandit ${this.fullName(b)}.`, [b.id], 1); return `You ride after ${b.name}.`; }
+    const L = this.lairs.find(l => l.id === a.id); if (!L || !L.alive) return 'The lair is empty.';
+    if (a.approach === 'tame' && !MON[L.key].tame) return 'That cannot be tamed.';
+    if (a.approach === 'trap' && (MON[L.key].rift || L.key === 'dragon')) return 'That cannot be trapped.';
+    p.task = { type: 'contract', lair: L.id, approach: a.approach || 'slay' };
+    this.you(`You set out to ${a.approach || 'slay'} ${MON[L.key].the}.`, [], 1); return 'You set out for the lair.';
+  }
+  huntResolve(L, approach) {
+    const p = this.player; const M = MON[L.key]; const odds = this.huntOdds(L, approach);
+    if (this.chance(odds)) {
+      const reward = Math.round(30 + L.strength * L.base); p.gold = (p.gold || 0) + reward; p.fame += Math.round(8 * L.base); this.gainXp(p, 60);
+      let title = approach === 'tame' ? 'Beast Tamer' : approach === 'trap' ? 'Trapper' : M.key === 'dragon' ? 'Dragonslayer' : L.base >= 2.8 ? 'Giant Slayer' : 'Monster Slayer';
+      const got = this.grantDeed(p, title);
+      if (approach === 'tame') p.followers = (p.followers || 0) + Math.round(6 * L.base);
+      L.alive = false; if (this.chance(0.6)) this.respawnLair(L);
+      this.you(`You ${approach === 'tame' ? `tame ${M.the} and lead the beasts home` : approach === 'trap' ? `capture ${M.the} alive` : M.rift ? `fight through the elementals and close ${M.the}` : `slay ${M.the}`}. The villages pay you ${reward} gold.${got ? ` Bards now call you ${title}.` : ''}`, [], 3);
+    } else {
+      const lost = Math.round((p.followers || 0) * (0.3 + this.r() * 0.4)); p.followers = Math.max(0, (p.followers || 0) - lost);
+      if (this.chance(0.35 + (1 - odds) * 0.3)) this.die(p, `killed by ${M.the}`);
+      else { p.wounded = 8; this.you(`${M.the[0].toUpperCase() + M.the.slice(1)} drives you back. You escape badly wounded${lost ? `, and ${lost} of your followers do not` : ''}.`, [], 3); }
+    }
+  }
+  skirmish(b, ambush) {
+    // a small fight on the battle map: your followers against a bandit band
+    const p = this.player; const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)] || 'plains';
+    const entry = (f, roles) => { const i = UNITS[f].findIndex(u => u.entry && roles.includes(u.role)); return i >= 0 ? i : 0; };
+    const mates = this.living().filter(x => x.companionOf === p.id);
+    const yourCount = Math.max(3, (p.followers || 0) + mates.length * 3);
+    const cfg = { seed: Math.floor(this.r() * 1e9), terrain: g === 'water' ? 'plains' : g, season: this.season, sides: [
+      { faction: p.culture, name: 'Your band', realmId: null, color: '#4fa3ff', ai: 'balanced', canFire: false, mods: { morale: 5, atk: 1 }, divisions: [{ faction: p.culture, unit: this.pickUnit(p, p.culture), count: yourCount, level: Math.min(10, 1 + Math.floor(p.level / 2)), officer: { name: p.name, stats: p.stats, ref: p.id } }] },
+      { faction: b.culture, name: `${b.name}'s bandits`, realmId: null, color: '#ff5a4a', ai: ambush ? 'reckless' : 'balanced', canFire: false, mods: { morale: ambush ? 8 : 0, atk: 1 }, divisions: [{ faction: b.culture, unit: entry(b.culture, ['inf', 'cav']), count: Math.max(4, b.band), level: 2, officer: { name: b.name, stats: b.stats, ref: b.id } }] },
+    ] };
+    this.stats.battles++;
+    const ctx = { kind: 'skirmish', index: this.stats.battles, cfg, bandit: b, playerSide: 0, lines: [], big: false, title: ambush ? `Ambush! ${b.name}'s bandits fall on you` : `You hunt down ${b.name}'s bandits` };
+    this.queueBattle(ctx);
+  }
+  applySkirmish(ctx, b) {
+    const p = this.player, band = ctx.bandit; const won = b.winner === 0;
+    const mine = b.divisions[0], theirs = b.divisions[1];
+    const survive = (b.aliveCount(mine) + mine.fled) / mine.start;
+    p.followers = Math.max(0, Math.round((p.followers || 0) * survive));
+    if (!mine.officer.alive) { this.die(p, `cut down by the bandits of ${band.name}`); return; }
+    if (won) {
+      const reward = 20 + band.band; p.gold = (p.gold || 0) + reward; p.fame += 8; p.kills++; this.gainXp(p, 40);
+      if (!theirs.officer.alive || this.chance(0.6)) this.die(band, `slain by ${p.name}`); else band.band = Math.round(band.band * 0.3);
+      this.you(`You defeat the bandits of ${band.name}${band.alive ? ', who flees into the hills' : ''}. The villages pay you ${reward} gold.`, [band.id], 2);
+    } else {
+      const lost = Math.round((p.gold || 0) * 0.5); p.gold = (p.gold || 0) - lost; p.wounded = 6;
+      if (mine.officer.captured) { this.you(`The bandits of ${band.name} beat you, strip you of ${lost} gold and leave you for dead.`, [band.id], 2); }
+      else this.you(`Your band breaks before ${band.name}'s cutthroats. You flee, ${lost} gold poorer.`, [band.id], 2);
+      band.fame += 4; band.band += 3;
+    }
+  }
+  act_hire(a) {
+    const p = this.player, s = this.sett(p.settId); if (!s || s.destroyed) return 'There is no one here to hire.';
+    const n = Math.max(0, Math.min(a.n || 5, Math.floor((p.gold || 0) / 6), Math.floor(s.pop / 40)));
+    if (!n) return 'You cannot afford anyone.';
+    p.gold -= n * 6; p.followers = (p.followers || 0) + n;
+    return `You hire ${n} sellswords at ${s.name}.`;
+  }
+  act_recruitCompanion(a) {
+    const p = this.player, v = this.char(a.id); if (!v || !v.alive) return 'They are gone.';
+    if ((p.gold || 0) < 20) return 'You need 20 gold to stand them a feast and a share.';
+    p.gold -= 20;
+    if (this.chance(0.35 + p.stats.cha * 0.03 + p.fame * 0.005)) { v.companionOf = p.id; this.opine(v, p, 35); this.opine(p, v, 35); this.you(`${this.fullName(v)} joins you as a companion.`, [v.id], 2); return `${v.name} joins you.`; }
+    this.opine(v, p, -5); return `${v.name} drinks your ale and declines.`;
+  }
+  act_serve(a) {
+    const p = this.player, r = this.realm(a.realm); if (!r || !r.alive) return 'That realm is gone.';
+    const ruler = this.char(r.rulerId);
+    if (p.fame + p.stats.cha + this.r() * 10 < 22) return `${ruler ? ruler.name : 'The lord'} turns you away. Come back with more of a name.`;
+    const fol = p.followers || 0;
+    this.addOfficer(r, p); p.army = this.newArmy(p, 0.6); p.army.size += fol; p.followers = 0; p.task = null;
+    for (const x of this.living()) if (x.companionOf === p.id) { this.addOfficer(r, x); x.army = this.newArmy(x, 0.4); }
+    this.you(`You kneel before ${ruler ? `${this.rulerTitle(r, ruler)} ${this.fullName(ruler)}` : r.name} and are made an officer of ${r.name}, at the head of ${p.army.size} troops.`, [ruler?.id].filter(Boolean), 3);
+    return `You serve ${r.name} now.`;
+  }
+  act_found(a) {
+    const p = this.player;
+    if ((p.followers || 0) < 12 || p.fame < 15) return 'You need at least 12 followers and some renown (fame 15).';
+    let s = this.setts.filter(x => x.destroyed && this.dist(x, p) < 7).sort((x, y) => this.dist(x, p) - this.dist(y, p))[0];
+    let rebuilt = !!s;
+    if (!s) {
+      let best = null;
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const x = Math.round(p.x) + dx, y = Math.round(p.y) + dy; const b = this.grid[y]?.[x];
+        if (!b || b === 'water' || b === 'mountain') continue;
+        if (this.setts.some(o => (o.x - x) ** 2 + (o.y - y) ** 2 < 9)) continue;
+        const d = dx * dx + dy * dy; if (!best || d < best.d) best = { x, y, d, b };
+      }
+      if (!best) return 'There is no free land near here.';
+      const cul = cultureById(p.culture);
+      s = { id: this.id(), name: this.placeName(cul), x: best.x, y: best.y, biome: best.b, culture: p.culture, pop: 0, food: 0, unrest: 0, realmId: null, destroyed: false, famine: false, guard: 'Light', headmanId: null };
+      this.setts.push(s);
+    }
+    s.destroyed = false; s.pop = 60 + (p.followers || 0) * 6; s.food = 60; s.unrest = 5; s.famine = false; s.realmId = null;
+    const r = this.makeRealm(s, p.id); p.role = 'ruler'; p.realmId = r.id; p.settId = s.id; p.dynasty = p.dynasty || this.dynastyName(); r.dynasty = p.dynasty;
+    p.army = { size: p.followers, level: 2, xp: 0, wins: 0, losses: 0, faction: p.culture, unit: this.pickUnit(p, p.culture) }; p.followers = 0; p.task = null;
+    for (const x of this.living()) if (x.companionOf === p.id) { this.addOfficer(r, x); x.army = this.newArmy(x, 0.3); }
+    this.stats.realmsRisen++;
+    this.you(`You ${rebuilt ? `rebuild ${s.name} from its ruins` : `found the village of ${s.name}`} and become its ${p.female ? 'headwoman' : 'headman'}. House ${p.dynasty} begins.`, [], 3);
+    return `${s.name} is yours.`;
+  }
+
+  // ---------- officer life ----------
+  act_train() {
+    const p = this.player; if (!p.army) return 'You command no troops.';
+    if (p.trainedYear === this.year) return 'Your troops have trained hard this year already.';
+    p.trainedYear = this.year; this.armyXp(p, 35); this.gainXp(p, 15); return `You drill your ${this.plural(this.unitName(p.army))} hard.`;
+  }
+  act_leave() {
+    const p = this.player, r = this.playerRealm(); if (!r || p.role !== 'officer') return 'You serve no one.';
+    p.followers = Math.round((p.army?.size || 0) * 0.15); p.army = null; p.role = 'vagabond'; p.realmId = null; p.liegeId = null; p.titles.rank = null;
+    const ruler = this.char(r.rulerId); if (ruler) this.opine(ruler, p, -25);
+    this.you(`You leave the service of ${r.name} with ${p.followers} loyal soldiers at your back.`, [ruler?.id].filter(Boolean), 2); return 'You take to the road again.';
+  }
+  act_oath(a) {
+    const p = this.player, o = this.char(a.id); if (!o || !o.alive) return 'They are gone.';
+    if (p.oath.length) return 'You are already sworn.';
+    if (this.op(o, p) + p.stats.cha + this.r() * 30 < 45) { this.opine(o, p, -5); return `${o.name} is not ready to bind their fate to yours.`; }
+    p.oath = [o.id]; o.oath = [p.id]; this.opine(o, p, 40); this.opine(p, o, 40);
+    this.you(`You and ${this.fullName(o)} swear an oath of brotherhood, to live and die as one.`, [o.id], 2); return `You are sworn to ${o.name}.`;
+  }
+  act_rebel() {
+    const p = this.player, r = this.playerRealm(); if (!r || p.role !== 'officer') return 'You have no one to rebel against.';
+    const holdings = this.realmSetts(r).filter(s => s.id !== r.capital).sort((a, b) => this.dist(a, p) - this.dist(b, p));
+    if (!holdings.length) return 'There is no holding to seize.';
+    const s = holdings[0]; const ruler = this.char(r.rulerId);
+    const nr = this.makeRealm(s, p.id); p.role = 'ruler'; p.realmId = nr.id; p.settId = s.id; p.liegeId = null; nr.dynasty = p.dynasty || this.dynastyName(); p.dynasty = nr.dynasty;
+    if (p.oath.length) { this.spreadRumor(p, 'oathbreaker', 1); }
+    this.spreadRumor(p, 'traitor', 2);
+    this.stats.realmsRisen++;
+    this.you(`You raise your banners at ${s.name} and declare yourself free of ${r.name}!`, [ruler?.id].filter(Boolean), 3);
+    this.declareWar(r, nr, `the rebellion of ${p.name}`);
+    return 'Rebellion!';
+  }
+
+  // ---------- ruling ----------
+  act_tax(a) { const r = this.playerRealm(); r.tax = a.level; return `Taxes are now ${a.level}.`; }
+  act_guard(a) { const r = this.playerRealm(); r.guardChoice = a.level; const cap = this.sett(r.capital); if (cap) cap.guard = a.level; return `The guard is now ${a.level}.`; }
+  act_war(a) {
+    const r = this.playerRealm(), t = this.realm(a.realm); if (!t || !t.alive) return 'That realm is gone.';
+    if (this.atWar(r, t)) return 'You are already at war with them.';
+    if ((r.truce.get(t.id) || 0) > this.year) { this.spreadRumor(this.player, 'oathbreaker', 2); }
+    if (r.allies.has(t.id)) { this.spreadRumor(this.player, 'oathbreaker', 3); r.allies.delete(t.id); t.allies.delete(r.id); }
+    this.declareWar(r, t, a.reason || 'your ambition'); return `War with ${t.name}!`;
+  }
+  act_peace(a) {
+    const r = this.playerRealm(); const w = this.wars.find(x => !x.over && (x.a === r.id || x.b === r.id) && (x.a === a.realm || x.b === a.realm));
+    if (!w) return 'You are not at war with them.';
+    const mineScore = w.a === r.id ? w.score : -w.score;
+    const their = this.realm(a.realm); const tr = this.char(their.rulerId);
+    const p = 0.25 + (mineScore >= 0 ? 0.25 : -0.1 * Math.min(3, -mineScore)) + (tr && this.has(tr, 'content') ? 0.2 : 0) + (tr && this.has(tr, 'ambitious') ? -0.15 : 0) + w.months * 0.01;
+    if (!this.chance(Math.max(0.05, Math.min(0.9, p)))) return `${their.name} rejects your envoys. The war goes on.`;
+    this.makePeace(w, this.realm(w.a), this.realm(w.b)); return `Peace with ${their.name}.`;
+  }
+  act_persuade(a) {
+    const r = this.playerRealm(), v = this.realm(a.realm), p = this.player;
+    if (!v || !v.alive || v.setts.size !== 1) return 'They are no free village.';
+    if (r.persuadedYear === this.year) return 'Your envoys need time; try again next year.';
+    r.persuadedYear = this.year;
+    const vr = this.char(v.rulerId);
+    if (p.stats.cha + p.fame * 0.2 + (r.aidGiven || 0) * 3 + this.r() * 10 > (vr ? vr.stats.cha + 8 : 6)) {
+      this.you(`The folk of ${v.name} agree to join ${r.name}${vr ? `; ${vr.name} kneels` : ''}.`, [vr?.id].filter(Boolean), 2); this.annexVillage(v, r); return `${v.name} joins you.`;
+    }
+    if (vr) this.opine(vr, p, -10); return `${v.name} refuses. Perhaps kindness, fame or force will change their minds.`;
+  }
+  act_recruit(a) {
+    const r = this.playerRealm(), v = this.char(a.id); if (!v || !v.alive) return 'They are gone.';
+    if (r.treasury < 40) return 'The treasury cannot pay them (40 gold).';
+    r.treasury -= 40; this.addOfficer(r, v); v.army = this.newArmy(v, 0.6); this.opine(v, this.player, 20);
+    this.you(`${this.fullName(v)} enters your service.`, [v.id], 1); return `${v.name} serves you now.`;
+  }
+  marriageCandidates(c = this.player) {
+    return this.living().filter(o => o.id !== c.id && !o.spouseId && o.female !== c.female && this.age(o) >= 17 && Math.abs(this.age(o) - this.age(c)) < 16 && !this.kin(c, o) && !o.betrothed && (o.noble || o.role === 'officer' || o.role === 'ruler' || this.dist(o, c) < 6))
+      .sort((a, b) => (b.role === 'ruler' ? 30 : 0) + b.fame - ((a.role === 'ruler' ? 30 : 0) + a.fame)).slice(0, 8);
+  }
+  act_marry(a) {
+    const p = this.player, o = this.char(a.id); if (!o || !o.alive || o.spouseId) return 'That match is no longer possible.';
+    if (p.spouseId) return 'You are already wed.';
+    const accept = 0.3 + this.op(o, p) * 0.01 + p.fame * 0.006 + p.stats.cha * 0.02 + (this.playerRules() ? 0.15 : 0) - (o.role === 'ruler' && !this.playerRules() ? 0.3 : 0);
+    if (!this.chance(Math.max(0.05, Math.min(0.95, accept)))) { this.opine(o, p, -5); return `${o.name} declines your proposal.`; }
+    this.marry(p, o, false); return `You wed ${o.name}.`;
+  }
+  act_tournament() {
+    const r = this.playerRealm(); if (r.treasury < 80) return 'A tournament costs 80 gold.';
+    if (this.wars.some(w => !w.over && (w.a === r.id || w.b === r.id))) return 'Not while at war.';
+    r.hostTournament = true; return 'Heralds ride out: a tournament will be held this summer.';
   }
 
   // ---------- views ----------

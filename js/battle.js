@@ -28,7 +28,8 @@ export class Battle {
   constructor(cfg) {
     this.rand = mulberry(cfg.seed || 1);
     this.terrain = cfg.terrain || 'plains';
-    this.t = 0; this.over = false; this.winner = null; this.events = [];
+    this.t = 0; this.steps = 0; this.over = false; this.winner = null; this.events = [];
+    this.script = (cfg.script || []).slice(); this.recorded = [];
     this.soldiers = []; this.divisions = []; this.projectiles = []; this.messengers = []; this.fires = []; this.corpses = [];
     this.cell = 32; this.gw = Math.ceil(FIELD.w / this.cell); this.gh = Math.ceil(FIELD.h / this.cell);
     this.season = cfg.season || 'Summer';
@@ -36,6 +37,8 @@ export class Battle {
     this.trees = [];
     const nTrees = { forest: 70, plains: 8, swamp: 22, wasteland: 6, tundra: 14, mountain: 18 }[this.terrain] || 8;
     for (let i = 0; i < nTrees; i++) this.trees.push({ x: 260 + this.r() * (FIELD.w - 520), y: 60 + this.r() * (FIELD.h - 120), alt: this.r() < 0.35 });
+    const total = cfg.sides.reduce((a, sd) => a + sd.divisions.reduce((x, d) => x + d.count, 0), 0);
+    this.inset = total < 250 ? 360 : 0; // small fights start closer together
     for (const side of this.sides) {
       const n = side.divisions.length;
       side.divisions.forEach((d, k) => {
@@ -48,7 +51,7 @@ export class Battle {
         const mods = side.mods || {};
         const mult = (1 + 0.22 * tier) * lvl;
         const y = FIELD.h * (k + 1) / (n + 1);
-        const x = side.index === 0 ? 260 + (role === 'ranged' || role === 'magic' ? -60 : 0) : FIELD.w - 260 - (role === 'ranged' || role === 'magic' ? -60 : 0);
+        const x = side.index === 0 ? 260 + this.inset + (role === 'ranged' || role === 'magic' ? -60 : 0) : FIELD.w - 260 - this.inset - (role === 'ranged' || role === 'magic' ? -60 : 0);
         const div = {
           id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
           stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
@@ -96,8 +99,9 @@ export class Battle {
   enemiesOf(side) { return this.divisions.filter(d => d.side !== side && !d.routed && this.aliveCount(d) > 0); }
 
   // ---------- orders ----------
-  issue(div, order, fromSide = div.side) {
+  issue(div, order, fromSide = div.side, scripted = false) {
     if (div.routed || this.over) return;
+    if (!scripted && !this.sides[fromSide].ai) this.recorded.push({ step: this.steps, type: 'order', div: div.id, order, side: fromSide });
     const side = this.sides[fromSide];
     const o = div.officer;
     const dist = Math.hypot(o.x - side.hq.x, o.y - side.hq.y);
@@ -111,8 +115,10 @@ export class Battle {
     if (order === 'charge') div.chargeT = this.t;
     if (order === 'flankL' || order === 'flankR') { const sign = order === 'flankL' ? -1 : 1; const c = this.centroid(div); div.flankPt = { x: c.x + div.facing * 160, y: Math.max(60, Math.min(FIELD.h - 60, c.y + sign * 300 * (div.side === 0 ? 1 : -1))) }; }
   }
-  fireAttack(sideIdx, x, y) {
+  takeover(sideIdx, style = 'balanced') { if (this.sides[sideIdx].ai) return; this.recorded.push({ step: this.steps, type: 'ai', side: sideIdx, style }); this.sides[sideIdx].ai = style; }
+  fireAttack(sideIdx, x, y, scripted = false) {
     const side = this.sides[sideIdx]; if (side.fireUsed || this.over) return false;
+    if (!scripted && !side.ai) this.recorded.push({ step: this.steps, type: 'fire', side: sideIdx, x, y });
     side.fireUsed = true;
     this.fires.push({ x, y, r: 75, land: this.t + 2.2, end: this.t + 7, side: sideIdx, hit: false, from: { ...side.hq } });
     this.log(`${side.name} looses a volley of fire arrows.`, sideIdx, 'strat');
@@ -122,6 +128,14 @@ export class Battle {
   // ---------- main update ----------
   step(dt) {
     if (this.over) return;
+    // replay recorded commands at exactly the step they were given
+    while (this.script.length && this.script[0].step <= this.steps) {
+      const c = this.script.shift();
+      if (c.type === 'order') this.issue(this.divisions[c.div], c.order, c.side, true);
+      else if (c.type === 'fire') this.fireAttack(c.side, c.x, c.y, true);
+      else if (c.type === 'ai') this.sides[c.side].ai = c.style;
+    }
+    this.steps++;
     this.t += dt;
     this.buildGrid();
     for (const m of [...this.messengers]) {

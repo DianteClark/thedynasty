@@ -22,6 +22,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ctl.primary { background: var(--gold); color: #1b140b; border-color: var(--gold); }
 .ctl:disabled { opacity: .45; }
 .progress { height: 4px; background: var(--panel2); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+.plabel { font-size: 12px; color: var(--dim); margin-top: 4px; font-family: var(--serif); }
 .progress div { height: 100%; width: 0; background: var(--gold); transition: width .1s; }
 
 main { padding: 12px 14px 20px; }
@@ -108,7 +109,8 @@ body.in-battle header.top, body.in-battle .tabs, body.in-battle main { visibilit
 .btoast { background: rgba(22,18,13,.88); border-left: 3px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-family: var(--serif); max-width: 520px; }
 .btoast.good { border-left-color: #6fbf73; } .btoast.bad { border-left-color: #e2553f; } .btoast.strat { border-left-color: #ff8a3d; }
 .bmini { position: absolute; right: 8px; bottom: calc(118px + var(--safe-b)); width: 150px; height: 94px; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
-.bbtn.fire { position: absolute; left: 8px; bottom: calc(118px + var(--safe-b)); }
+.bbtn.fire, .bfirebar { position: absolute; left: 8px; bottom: calc(118px + var(--safe-b)); }
+.bfirebar { display: flex; gap: 6px; right: 166px; flex-wrap: wrap; }
 .bdivs { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 8px 8px calc(8px + var(--safe-b)); background: linear-gradient(transparent, rgba(10,8,6,.9) 30%); }
 .bdiv { text-align: left; background: rgba(33,27,20,.92); border: 1px solid var(--line); border-radius: 10px; padding: 7px 8px; display: grid; grid-template-columns: 1fr auto; gap: 3px 6px; min-height: 92px; align-content: start; }
 .bdiv.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
@@ -143,3 +145,24 @@ body.map-mode main { padding: 0; }
 .wcard .kv { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .wrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
 @media (max-width: 420px) { .wcard { right: 8px; bottom: 100px; } }
+
+/* ---------- you ---------- */
+.hero-card { border-color: #6b5226; background: linear-gradient(#2a2117, var(--panel)); }
+.card.danger { border-color: #6a2e24; }
+.card.danger h3 { color: #ffb4a6; }
+button.card { width: 100%; text-align: left; color: var(--ink); font: inherit; display: block; }
+.origin.on, .cult.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.cultgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.cult { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; text-align: left; }
+.cult small { display: block; color: var(--dim); font-size: 11.5px; }
+.uicon { flex: none; display: inline-block; image-rendering: pixelated; }
+.abtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.abtn { background: var(--panel2); border: 1px solid #6b5226; color: var(--ink); border-radius: 10px; padding: 8px 11px; font-size: 13.5px; font-weight: 600; min-height: 38px; }
+.abtn:active { background: var(--gold); color: #1b140b; }
+.arow { display: flex; gap: 10px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 9px; margin-top: 9px; }
+.arow > div:first-child { min-width: 0; }
+.arow .abtns { margin-top: 0; justify-content: flex-end; }
+.toast { position: fixed; left: 12px; right: 12px; top: calc(12px + var(--safe-t)); z-index: 60; background: rgba(22,18,13,.97); border: 1px solid var(--gold); border-radius: 12px; padding: 12px 14px; font-family: var(--serif); font-size: 15px; line-height: 1.4; box-shadow: 0 8px 30px rgba(0,0,0,.5); transition: opacity .5s, transform .5s; max-width: 640px; margin: 0 auto; }
+.toast.you { border-color: #e9c46a; }
+.toast.out { opacity: 0; transform: translateY(-10px); }
+.entry.you, .entry.i3.you { border-left-color: #e9c46a; }

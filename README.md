@@ -72,3 +72,21 @@ The **Map** tab is now a living world map drawn with HAS art:
 - Pan, pinch to zoom, ⤢ for the whole map, a minimap you can tap to jump, and tap any settlement, host or lair for details
 
 Overworld art is built by `tools/build_world_assets.py`.
+
+## Prototype 0.5: you
+
+You live in the world now. The **You** tab is where your story happens.
+
+- **Character creation:** pick an origin (vagabond, village headman, minor lord or heir), one of the ten cultures, a name, and a mode. The world lives through 30 years of history first, then you are placed somewhere fitting within it.
+- **One life:** name a successor (a child, sibling, sworn sibling, companion or one of your officers). Kin always accept; anyone else must like you enough (opinion 20+), and must be alive and free. When you die, you continue as them; if no one can carry on, your line ends and you can start a new life in the same world or a new one.
+- **Ironman or casual:** casual mode spares you from death once.
+- **As a vagabond:** travel (tap any settlement on the map), take contracts against bandits (fought on the battle map with your band) or monster lairs (slay, trap or tame, with your odds shown), hire sellswords, win over companions, offer your sword to a lord, or found a village.
+- **As an officer or heir:** drill your troops, swear brotherhood with a fellow officer, leave service, or rebel and seize a holding.
+- **As a ruler:** set taxes and the guard, recruit officers, host tournaments, declare war, sue for peace, and win over free villages.
+- **Marriage** for everyone: rulers' marriages bind alliances.
+- **Your battles:** when your army takes the field you choose to command it, let your generals fight while you watch, or resolve it quickly. You can hand over to your generals mid-battle.
+- **Danger with warning:** plots against you can be uncovered by your spymaster (or your own wits and companions) before they strike. Lock down the guard, or keep moving.
+- **Time stops for you:** playing or skipping years pauses whenever something happens to you.
+- **Saves are exact:** your world is rebuilt from its seed, your actions and your battle orders.
+
+The battle sandbox has moved to the Stats tab.

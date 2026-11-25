@@ -179,6 +179,17 @@ function draw(t) {
     g.fillStyle = att.color; g.fillRect(mx - 1, my - 34, 2, 16); g.fillRect(mx + (flip ? -11 : 1), my - 34, 10, 7);
     if (sel?.kind === 'march' && sel.war === w) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.arc(mx, my - 6, 18, 0, 7); g.stroke(); }
   }
+  // you
+  const P = W.player;
+  if (P && P.alive && P.x != null && (P.role === 'vagabond' || P.task)) {
+    const px = P.x * T + 8, py = P.y * T + 10;
+    const dest = P.task ? (P.task.lair ? W.lairs.find(l => l.id === P.task.lair) : P.task.bandit ? W.char(P.task.bandit) : W.sett(P.task.to)) : null;
+    if (dest) { g.strokeStyle = '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(px, py); g.lineTo(dest.x * T + 8, dest.y * T + 8); g.stroke(); g.setLineDash([]); }
+    g.strokeStyle = '#ffd76a'; g.lineWidth = 2 / cam.z; g.beginPath(); g.ellipse(px, py + 1, 11, 4, 0, 0, 7); g.stroke();
+    const f = P.army ? P.army.faction : P.culture, u = P.army ? P.army.unit : W.pickUnitView(P);
+    drawUnitSprite(f, u, px, py, dest ? dest.x < P.x : false, P.task ? t : 0, 1.4);
+    g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(px - 11, py - 34, 22, 10); g.fillStyle = '#ffd76a'; g.fillText('You', px, py - 26);
+  }
   // labels
   g.textBaseline = 'bottom';
   for (const r of W.realmList()) {
@@ -229,7 +240,8 @@ function bind() {
   mini.addEventListener('pointerdown', e => { const r = mini.getBoundingClientRect(); cam.x = (e.clientX - r.left) / r.width * W.w * T; cam.y = (e.clientY - r.top) / r.height * W.h * T; });
   root.querySelector('[data-w=fit]').onclick = () => { const fitZ = Math.min(root._w / (W.w * T), root._h / (W.h * T)); if (cam.z > fitZ * 1.2) { cam.z = fitZ; cam.x = W.w * T / 2; cam.y = W.h * T / 2; } else { cam.z = 1.6; } };
   root.querySelector('#wcard').addEventListener('click', e => {
-    const t = e.target.closest('[data-wr],[data-wc],[data-wclose]'); if (!t) return;
+    const t = e.target.closest('[data-wr],[data-wc],[data-wclose],[data-wact]'); if (!t) return;
+    if (t.dataset.wact) { cb.act(JSON.parse(t.dataset.wact)); return; }
     if (t.dataset.wclose != null) { sel = null; card(); return; }
     if (t.dataset.wr) cb.realm(+t.dataset.wr);
     if (t.dataset.wc) cb.char(+t.dataset.wc);
@@ -256,7 +268,8 @@ function card() {
     box.innerHTML = `${close}<h3>${esc(s.name)}${s.destroyed ? ' (ruins)' : ''}</h3>
       <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
       ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
-      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span></div>`}`;
+      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span></div>`}
+      ${youVagabond() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${Math.max(1, Math.ceil(W.dist(s, W.player) / 3.4))} month(s)</button>` : ''}`;
   } else if (sel.kind === 'march') {
     const m = sel.war.march; if (!m) { sel = null; return card(); }
     const att = W.realm(m.att), def = W.realm(m.def), tgt = W.sett(m.target);
@@ -268,8 +281,10 @@ function card() {
   } else if (sel.kind === 'lair') {
     const L = sel.lair; const danger = L.strength > 50 ? 'Ready to break out' : L.strength > 30 ? 'Growing restless' : 'Stirring';
     const nm = MON[L.key] ? MON[L.key].the : L.key;
-    box.innerHTML = `${close}<h3>Lair of ${esc(nm)}</h3><div class="sub">${danger} · strength ${Math.round(L.strength * L.base)}</div><div class="sub" style="margin-top:6px">Left alone, monsters grow until they break out and ravage nearby settlements. Heroes may slay, trap or tame them.</div>`;
+    box.innerHTML = `${close}<h3>Lair of ${esc(nm)}</h3><div class="sub">${danger} · strength ${Math.round(L.strength * L.base)}</div><div class="sub" style="margin-top:6px">Left alone, monsters grow until they break out and ravage nearby settlements. Heroes may slay, trap or tame them.</div>
+      ${youVagabond() ? `<div class="abtns">${['slay', 'trap', 'tame'].filter(a => a === 'slay' || (a === 'tame' ? MON[L.key].tame : !MON[L.key].rift && L.key !== 'dragon')).map(a => `<button class="abtn" data-wact='${JSON.stringify({ type: 'contract', kind: 'lair', id: L.id, approach: a })}'>${a[0].toUpperCase() + a.slice(1)} · ${Math.round(W.huntOdds(L, a) * 100)}%</button>`).join('')}</div>` : ''}`;
   }
 }
+function youVagabond() { const p = W.player; return p && p.alive && p.role === 'vagabond' && !W.gameOver; }
 export function debugCam() { return cam; }
 export function refreshCard() { if (root && sel) card(); }
