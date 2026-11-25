@@ -32,7 +32,6 @@ function buildGround() {
 function setCam(mode) {
   camMode = mode; cam.x = B.fw / 2; cam.y = B.fh / 2; follow = mode !== 'far';
   cam.z = mode === 'close' ? 2 : mode === 'mid' ? 0.9 : Math.min(innerWidth / B.fw, innerHeight / B.fh);
-  document.querySelectorAll('[data-cam]').forEach(b => b.classList.toggle('on', b.dataset.cam === mode));
 }
 function fit() { dpr = Math.min(2, devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; }
 
@@ -67,47 +66,53 @@ function draw() {
 }
 function fps() { return frames.length; }
 function hud() {
+  if (!B) { $('#fps').textContent = '–'; $('#sim').textContent = '–'; $('#draw').textContent = '–'; $('#troops').textContent = '–'; return; }
   const f = fps(); const el = $('#fps'); el.textContent = f; el.className = f >= 55 ? '' : f >= 40 ? 'ok' : 'bad';
   $('#sim').textContent = simMs.toFixed(1); $('#draw').textContent = drawMs.toFixed(1);
   const alive = B ? B.soldiers.filter(s => s.alive && !s.fled).length : 0;
   $('#troops').textContent = `${alive.toLocaleString()} (${onScreen.toLocaleString()})`;
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
-async function measure(ms) { const samples = []; const end = performance.now() + ms; while (performance.now() < end) { await wait(250); samples.push(fps()); } return { fps: Math.round(samples.reduce((a, b) => a + b, 0) / samples.length), sim: simMs, draw: drawMs }; }
-async function auto(quick = false) {
-  const rows = []; const res = $('#results'); $('#auto').disabled = true; $('#quick').disabled = true;
-  const list = quick ? [2500, 5000, 10000, 15000, 20000] : PRESETS; const warm = quick ? 1500 : 4000, meas = quick ? 1500 : 2500;
-  const render = () => { res.innerHTML = `<table><tr><th>Troops</th><th>Whole field FPS</th><th>Close-up FPS</th><th>Sim ms</th><th>Draw ms</th></tr>${rows.map(r => `<tr><td>${r.n.toLocaleString()}</td><td>${r.far}</td><td>${r.close}</td><td>${r.sim.toFixed(1)}</td><td>${r.draw.toFixed(1)}</td></tr>`).join('')}</table>`; };
-  for (const n of list) {
-    start(n); setCam('mid'); await wait(warm); // let the armies close and clash
-    setCam('far'); const far = await measure(meas);
-    setCam('close'); const close = await measure(meas);
-    rows.push({ n, far: far.fps, close: close.fps, sim: (far.sim + close.sim) / 2, draw: far.draw }); render();
-    if (far.fps < 50 && close.fps < 50) break;
-  }
-  const smooth = rows.filter(r => Math.min(r.far, r.close) >= 55).pop();
-  res.innerHTML += `<p class="note">${smooth ? `Smooth (55+ FPS) up to <b>${smooth.n.toLocaleString()}</b> troops on this device, even zoomed all the way out.` : 'Below 55 FPS even at the smallest size on this device.'} Screenshot this table and send it over.</p>`;
-  $('#auto').disabled = false; $('#quick').disabled = false;
+let chosenN = 5000, chosenCam = 'mid', running = false, testing = false;
+const rows = [];
+function renderRows() {
+  $('#results').innerHTML = rows.length ? `<table><tr><th>Troops</th><th>Camera</th><th>Avg FPS</th><th>Low FPS</th><th>Sim ms</th><th>Draw ms</th></tr>${rows.map(r => `<tr><td>${r.n.toLocaleString()}</td><td>${r.cam}</td><td>${r.avg}</td><td>${r.low}</td><td>${r.sim.toFixed(1)}</td><td>${r.draw.toFixed(1)}</td></tr>`).join('')}</table>` : '';
 }
+function select() {
+  document.querySelectorAll('[data-n]').forEach(b => b.classList.toggle('on', +b.dataset.n === chosenN));
+  document.querySelectorAll('[data-cam]').forEach(b => b.classList.toggle('on', b.dataset.cam === chosenCam));
+  $('#go').disabled = testing;
+}
+async function runTest() {
+  if (testing) return;
+  testing = true; running = true; select();
+  start(chosenN); setCam(chosenCam); $('#stop').hidden = false;
+  $('#status').textContent = 'Armies closing…'; await wait(2000);
+  $('#status').textContent = 'Measuring…';
+  const samples = []; const end = performance.now() + 5000;
+  while (performance.now() < end) { await wait(250); samples.push(fps()); }
+  const avg = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length), low = Math.min(...samples);
+  rows.push({ n: chosenN, cam: { close: 'Close-up', mid: 'Mid', far: 'Whole field' }[chosenCam], avg, low, sim: simMs, draw: drawMs }); renderRows();
+  $('#status').textContent = `${chosenN.toLocaleString()} troops: ${avg} FPS average, ${low} lowest`;
+  testing = false; select();
+}
+function stop() { B = null; running = false; $('#stop').hidden = true; $('#status').textContent = 'Pick options, then Start test'; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, canvas.width, canvas.height); }
 
 (async () => {
   img.ground = await load('assets/ground/plains.png'); img.ammo = await load('assets/ammo.png');
   await Promise.all(FACTIONS.map(async f => { const im = await load(`assets/units/${f}.png`); img[f] = { r: im, l: flip(im) }; }));
   $('#presets').innerHTML = PRESETS.map(n => `<button class="chip" data-n="${n}">${n.toLocaleString()}</button>`).join('');
-  fit(); window.addEventListener('resize', () => { fit(); });
-  start(5000);
+  fit(); window.addEventListener('resize', fit);
+  select();
   document.addEventListener('click', e => {
     const t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.n) start(+t.dataset.n);
-    if (t.dataset.cam) setCam(t.dataset.cam);
-    if (t.id === 'pause') { paused = !paused; t.textContent = paused ? '▶' : '❚❚'; }
-    if (t.id === 'auto') auto();
-    if (t.id === 'quick') auto(true);
+    if (t.dataset.n && !testing) { chosenN = +t.dataset.n; select(); }
+    if (t.dataset.cam) { chosenCam = t.dataset.cam; select(); if (B && !testing) setCam(chosenCam); }
+    if (t.id === 'go') runTest();
+    if (t.id === 'stop' && !testing) stop();
   });
-  // drag to pan
   let p = null; canvas.addEventListener('pointerdown', e => { p = { x: e.clientX, y: e.clientY }; follow = false; });
-  canvas.addEventListener('pointermove', e => { if (!p) return; cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; p = { x: e.clientX, y: e.clientY }; });
+  canvas.addEventListener('pointermove', e => { if (!p || !B) return; cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; p = { x: e.clientX, y: e.clientY }; });
   canvas.addEventListener('pointerup', () => { p = null; });
   requestAnimationFrame(frame);
-  if (new URLSearchParams(location.search).has('quick')) auto(true);
 })();

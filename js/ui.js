@@ -310,7 +310,7 @@ function renderStats() {
     for (const c of titled.sort((a, b) => b.fame - a.fame).slice(0, 30)) html += `<div style="margin:6px 0">${charPill(c)} ${titleTags(c)}</div>`;
     html += `</div>`;
   }
-  html += `<h2 class="sec">Practice</h2><div class="card"><div class="sub">Fight a standalone battle with any culture's troops, outside your world.</div><button class="btn ghost" data-sandbox>Open the battle sandbox</button><a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="stress.html?quick">⚡ Quick troop stress test (FPS)</a></div>`;
+  html += `<h2 class="sec">Practice</h2><div class="card"><div class="sub">Fight a standalone battle with any culture's troops, outside your world.</div><button class="btn ghost" data-sandbox>Open the battle sandbox</button><a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="stress.html">Troop stress test (FPS)</a></div>`;
   view.innerHTML = html;
 }
 
