@@ -3,6 +3,7 @@
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
 import { Battle, UNITS } from './battle.js';
 import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
+import { installKnowledge } from './know.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -359,6 +360,7 @@ export class World {
     if (this.recentDuels && this.recentDuels.length) { e.duels = this.recentDuels; this.recentDuels = []; }
     this.chronicle.push(e);
     for (const id of ids) { const c = this.char(id); if (c) c.log.push(this.chronicle.length - 1); }
+    if (this.kn) this.hear(e);
   }
 
   // ---------- main loop ----------
@@ -381,6 +383,7 @@ export class World {
     this.agentsTick();
     this.playerTick();
     this.monthlyLife();
+    if (this.kn) this.knowledgeTick();
     if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
@@ -572,7 +575,7 @@ export class World {
   worldEvents() {
     const k = this.setts.length / 140; // bigger worlds see more of it
     const mi = this.year * 12 + this.month;
-    const mark = (x, y, r, what) => { (this.changes || (this.changes = [])).push({ x, y, r, what, at: mi }); this.terrainRev = (this.terrainRev || 0) + 1; if (this.changes.length > 200) this.changes.shift(); };
+    const mark = (x, y, r, what) => { (this.changes || (this.changes = [])).push({ x, y, r, what, at: mi }); this.terrainRev = (this.terrainRev || 0) + 1; if (this.changes.length > 200) this.changes.shift(); if (this.known) this.refog(x, y, r, { earthquake: 'an earthquake', wildfire: 'a great wildfire', flood: 'floods' }[what]); };
     const live = this.setts.filter(s => !s.destroyed);
     // earthquake: a cave yawns open and something crawls out of it
     if (this.chance(0.012 * k)) {
@@ -1481,7 +1484,9 @@ export class World {
     const fn = this['act_' + a.type];
     if (!fn) return 'Unknown action.';
     if (a.type !== 'start' && (!this.player || !this.player.alive)) return 'You are no longer among the living.';
-    return fn.call(this, a) || '';
+    const out = fn.call(this, a) || '';
+    if (a.type === 'start' && this.player) this.initKnowledge();
+    return out;
   }
 
   // ---------- starting a life ----------
@@ -1592,7 +1597,7 @@ export class World {
           p.x = dest.x; p.y = dest.y; p.task = null;
           if (t.bandit) this.skirmish(dest, false);
           else if (t.lair) this.huntResolve(dest, t.approach);
-          else { p.settId = dest.id; this.you(`You arrive at ${dest.name}.`, [], 1); }
+          else { p.settId = dest.id; this.reveal(dest.x, dest.y, 10); this.learnLocals(dest); this.you(`You arrive at ${dest.name}.`, [], 1); }
         }
       }
     }
@@ -2052,7 +2057,7 @@ export class World {
     const mine = this.playerRealm() && this.playerRealm().id === A.id;
     if (success) {
       w.intel[A.id] = (w.intel[A.id] || 0) + 0.2; if (sm) this.gainXp(sm, 15);
-      if (mine) this.you(`${spyName}, your spy posing as ${cover}, returns from ${B.name} with their battle plans. Your next battle against them will go better.`, [], 2);
+      if (mine) { this.learnCourt(B); this.you(`${spyName}, your spy posing as ${cover}, returns from ${B.name} with their battle plans, and the names and titles of everyone at their court. Your next battle against them will go better.`, [], 2); }
       else if (this.chance(0.4)) this.log(1, 'spy', `A spy of ${A.name}, posing as ${cover}, slips into ${B.name} and returns with their battle plans.`, sm ? [sm.id] : []);
     } else {
       const fate = this.r(); const br = this.char(B.rulerId);
@@ -2205,11 +2210,12 @@ export class World {
   toJSON() {
     const o = {};
     for (const [k, v] of Object.entries(this)) {
-      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', 'ocean', 'landId', 'wildId', 'terr'].includes(k) || k[0] === '_' || typeof v === 'function') continue;
+      if (['chars', 'realms', 'pendingBattle', 'replayLog', 'lastPlayerDuel', 'ocean', 'landId', 'wildId', 'terr', 'known'].includes(k) || k[0] === '_' || typeof v === 'function') continue;
       o[k] = v;
     }
     o.chars = [...this.chars.values()];
     o.realms = [...this.realms.values()].map(r => ({ ...r, setts: [...r.setts], allies: [...r.allies], truce: [...r.truce.entries()] }));
+    o.knownStr = this.known ? this.known.join('') : null;
     o.v = 1;
     return o;
   }
@@ -2220,6 +2226,8 @@ export class World {
     w.realms = new Map(o.realms.map(r => [r.id, { ...r, setts: new Set(r.setts), allies: new Set(r.allies), truce: new Map(r.truce) }]));
     w.pendingBattle = null; w.replaying = false; w.replayLog = null;
     buildGeo(w, true); // land, sea, wilds and territories are rebuilt from the map
+    w.known = o.knownStr && o.knownStr.length === w.w * w.h ? o.knownStr.split('').map(Number) : null; delete w.knownStr;
+    if (!w.known) w.kn = null; // saves from before 2.3: you know the whole world
     applyMod(w.mod); if (!w.tune) w.tune = { war: 1, monsters: 1, famine: 1, plots: 1, tournaments: 1 };
     delete w.v;
     return w;
@@ -2230,3 +2238,4 @@ export class World {
 }
 
 export { TROOP_TIERS, GUARD, MON };
+installKnowledge(World);

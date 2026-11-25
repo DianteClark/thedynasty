@@ -22,7 +22,7 @@ function loadArt() {
 
 let W = null, root = null, canvas, g, mini, mg, terrainKey = '', ownerKey = '';
 const CH = 32; // cells per map chunk (512px): only the chunks on screen are ever drawn
-const tChunks = new Map(), oChunks = new Map();
+const tChunks = new Map(), oChunks = new Map(), fChunks = new Map(); let fogKey = '';
 const BCOL = { water: [34, 66, 104], plains: [112, 168, 76], forest: [44, 112, 54], swamp: [78, 104, 86], wasteland: [196, 168, 104], tundra: [226, 232, 238], mountain: [118, 100, 90] };
 let cam = { x: 0, y: 0, z: 1, follow: true }, raf = 0, sel = null, cb = {}, dpr = 1;
 // movers glide between where they were at the start of the month and where they are now
@@ -66,6 +66,23 @@ function invalidate() {
   const live = W.setts.filter(s => !s.destroyed && s.realmId && W.realm(s.realmId)?.alive);
   const ok = live.map(s => s.id + ':' + s.realmId).join(',');
   if (ok !== ownerKey) { ownerKey = ok; oChunks.clear(); mini && (mini._bg = null); }
+  const fk = (W.known ? 'k' : 'n') + (W.knownRev || 0);
+  if (fk !== fogKey) { fogKey = fk; fChunks.clear(); mini && (mini._bg = null); }
+}
+// the cartographer's map: land you've never seen is blank parchment, with a soft edge
+const kn = (x, y) => !W.known || (x >= 0 && y >= 0 && x < W.w && y < W.h && W.known[y * W.w + x] === 1);
+function fogChunk(cx, cy) {
+  return lru(fChunks, cx + ',' + cy, () => {
+    const x0 = cx * CH, y0 = cy * CH, x1 = Math.min(W.w, x0 + CH), y1 = Math.min(W.h, y0 + CH);
+    const c = document.createElement('canvas'); c.width = CH * T; c.height = CH * T; const f = c.getContext('2d');
+    f.translate(-x0 * T, -y0 * T);
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      if (!kn(x, y)) { f.fillStyle = (x + y) % 2 ? '#211a12' : '#1f1811'; f.fillRect(x * T, y * T, T, T); continue; }
+      let edge = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!kn(x + dx, y + dy)) edge++;
+      if (edge) { f.fillStyle = `rgba(31,24,17,${0.25 + 0.12 * edge})`; f.fillRect(x * T, y * T, T, T); }
+    }
+    return c;
+  });
 }
 function lru(map, key, make) {
   let c = map.get(key); if (c) { map.delete(key); map.set(key, c); return c; }
@@ -104,6 +121,11 @@ function terrainChunk(cx, cy) {
     objs.sort((a, b) => a.y - b.y).forEach(o => o.draw());
     return c;
   });
+}
+function landSeen(L) {
+  if (!W.known) return true;
+  if (W._landSeenRev !== W.knownRev) { W._landSeenRev = W.knownRev; W._landSeen = new Set(); for (let i = 0; i < W.known.length; i++) if (W.known[i] && W.landId[i]) W._landSeen.add(W.landId[i]); }
+  return W._landSeen.has(L.id);
 }
 function ownerAt(x, y) {
   if (x < 0 || y < 0 || x >= W.w || y >= W.h) return null;
@@ -191,7 +213,10 @@ function draw(t) {
     for (let cx = Math.max(0, Math.floor(vx0 / cs)); cx <= Math.min(Math.ceil(W.w / CH) - 1, Math.floor((vx0 + vw) / cs)); cx++) {
       g.drawImage(terrainChunk(cx, cy), cx * cs, cy * cs); g.drawImage(ownerChunk(cx, cy), cx * cs, cy * cs);
     }
-  const vis = (x, y, m = 3) => x * T > vx0 - m * T && x * T < vx0 + vw + m * T && y * T > vy0 - m * T && y * T < vy0 + vh + m * T;
+  const fogChunks = [];
+  if (W.known) for (let cy = Math.max(0, Math.floor(vy0 / cs)); cy <= Math.min(Math.ceil(W.h / CH) - 1, Math.floor((vy0 + vh) / cs)); cy++)
+    for (let cx = Math.max(0, Math.floor(vx0 / cs)); cx <= Math.min(Math.ceil(W.w / CH) - 1, Math.floor((vx0 + vw) / cs)); cx++) fogChunks.push([cx, cy]);
+  const vis = (x, y, m = 3) => x * T > vx0 - m * T && x * T < vx0 + vw + m * T && y * T > vy0 - m * T && y * T < vy0 + vh + m * T && kn(Math.round(x), Math.round(y));
   const now = W.year * 12 + W.month;
   // harbours: a dock on the water, and a lighthouse at the bigger ports
   for (const s of W.setts) {
@@ -228,7 +253,7 @@ function draw(t) {
     const m = w.march; if (!m) continue;
     const att = W.realm(m.att), tgt = W.sett(m.target); if (!att || !tgt) continue;
     const offs = m.officers.map(id => W.char(id)).filter(o => o && o.alive && o.army);
-    const mp = at('w' + w.id, m); const mx = mp.x * T + 8, my = mp.y * T + 10;
+    const mp = at('w' + w.id, m); if (!vis(mp.x, mp.y, 6)) continue; const mx = mp.x * T + 8, my = mp.y * T + 10;
     g.strokeStyle = att.color; g.lineWidth = 1.5 / cam.z; g.setLineDash([4, 4]); pathLine(mx, my, m.path, tgt); g.setLineDash([]);
     const nxt = m.path && m.path[0] || tgt; const flip = nxt.x < m.x;
     if (m.atSea) { drawShip(mx, my, nxt.x - m.x, nxt.y - m.y, t, 1.6); drawShip(mx - 12, my + 6, nxt.x - m.x, nxt.y - m.y, t + 0.5, 1.2); }
@@ -287,22 +312,23 @@ function draw(t) {
     const pp = at('p' + P.id, P); const px = pp.x * T + 8, py = pp.y * T - 22;
     g.font = '600 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(px - 12, py - 9, 24, 11); g.fillStyle = '#ffd76a'; g.fillText('You', px, py);
   }
+  for (const [cx, cy] of fogChunks) g.drawImage(fogChunk(cx, cy), cx * cs, cy * cs);
   // labels: continents and islands when zoomed out, named wilds up close
   g.textBaseline = 'middle'; g.textAlign = 'center';
   if (cam.z < 1.15) for (const L of W.lands || []) {
-    if (L.kind === 'isle' || (L.kind === 'island' && cam.z < 0.7)) continue;
+    if (L.kind === 'isle' || (L.kind === 'island' && cam.z < 0.7) || !landSeen(L)) continue;
     const size = L.kind === 'continent' ? 30 : 14; g.font = `italic 700 ${size}px Georgia, serif`;
     g.lineWidth = 4; g.strokeStyle = 'rgba(16,12,8,.55)'; g.fillStyle = 'rgba(255,244,220,.85)';
     g.strokeText(L.name.toUpperCase(), L.cx * T, L.cy * T); g.fillText(L.name.toUpperCase(), L.cx * T, L.cy * T);
   }
   if (cam.z >= 0.7) {
     g.font = 'italic 9px Georgia, serif'; g.lineWidth = 3; g.strokeStyle = 'rgba(16,12,8,.7)'; g.fillStyle = '#e9dcb8';
-    for (const wd of W.wilds || []) { if (wd.size < 35 || !vis(wd.x, wd.y)) continue; const nm = wd.name[0].toUpperCase() + wd.name.slice(1); g.strokeText(nm, wd.x * T + 8, wd.y * T + 8); g.fillText(nm, wd.x * T + 8, wd.y * T + 8); }
+    for (const wd of W.wilds || []) { if (wd.size < 35 || !vis(wd.x, wd.y) || W.setts.some(st => Math.abs(st.x - wd.x) <= 2 && Math.abs(st.y - wd.y) <= 2)) continue; const nm = wd.name[0].toUpperCase() + wd.name.slice(1); g.strokeText(nm, wd.x * T + 8, wd.y * T + 8); g.fillText(nm, wd.x * T + 8, wd.y * T + 8); }
   }
   g.textBaseline = 'bottom';
   for (const r of W.realmList()) {
     if (r.tier === 'Village' && cam.z < 2.2) continue;
-    const s = W.sett(r.capital); if (!s || !vis(s.x, s.y)) continue;
+    const s = W.sett(r.capital); if (!s || !vis(s.x, s.y) || !W.knowsRealm(r)) continue;
     const war = W.wars.some(w => !w.over && (w.a === r.id || w.b === r.id));
     const label = (war ? '⚔ ' : '') + r.name;
     const size = r.tier === 'Kingdom' ? 11 : 9;
@@ -323,14 +349,15 @@ function drawMini() {
     const c = document.createElement('canvas'); c.width = W.w; c.height = W.h; const m = c.getContext('2d'); const id = m.createImageData(W.w, W.h);
     const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
     for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
-      let col = BCOL[W.grid[y][x]] || BCOL.plains; const o = ownerAt(x, y);
+      let col = BCOL[W.grid[y][x]] || BCOL.plains; const o = kn(x, y) ? ownerAt(x, y) : null;
+      if (!kn(x, y)) col = [33, 26, 18];
       if (o) { const rc = hex(W.realm(o).color); col = col.map((v, k) => Math.round(v * 0.55 + rc[k] * 0.45)); }
       const i = (y * W.w + x) * 4; id.data[i] = col[0]; id.data[i + 1] = col[1]; id.data[i + 2] = col[2]; id.data[i + 3] = 255;
     }
     m.putImageData(id, 0, 0); mini._bg = c;
   }
   mg.imageSmoothingEnabled = false; mg.drawImage(mini._bg, 0, 0, MW, MH);
-  for (const w of W.wars) if (w.march) { mg.fillStyle = W.realm(w.march.att)?.color || '#fff'; mg.fillRect(w.march.x * T * sx - 2, w.march.y * T * sy - 2, 4, 4); }
+  for (const w of W.wars) if (w.march && kn(Math.round(w.march.x), Math.round(w.march.y))) { mg.fillStyle = W.realm(w.march.att)?.color || '#fff'; mg.fillRect(w.march.x * T * sx - 2, w.march.y * T * sy - 2, 4, 4); }
   const vw = root._w / cam.z, vh = root._h / cam.z;
   mg.strokeStyle = '#ffd76a'; mg.lineWidth = 1.5; mg.strokeRect((cam.x - vw / 2) * sx, (cam.y - vh / 2) * sy, vw * sx, vh * sy);
 }
@@ -366,7 +393,7 @@ function tap(e) {
   const wx = (e.clientX - r.left - root._w / 2) / cam.z + cam.x, wy = (e.clientY - r.top - root._h / 2) / cam.z + cam.y;
   const reach = Math.max(14, 26 / cam.z);
   let best = null, bd = reach * reach;
-  const consider = (kind, x, y, obj) => { const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
+  const consider = (kind, x, y, obj) => { if (!kn(Math.round((x - 8) / T), Math.round(y / T))) return; const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { kind, ...obj }; } };
   for (const w of W.wars) if (w.march) { const mp = at('w' + w.id, w.march); consider('march', mp.x * T + 8, mp.y * T + 2, { war: w }); }
   for (const L of W.lairs) if (L.alive && (L.strength >= 15 || L.cave)) consider('lair', L.x * T + 8, L.y * T, { lair: L });
   const prr = W.playerRealm && W.playerRealm();
@@ -384,7 +411,7 @@ function card() {
     box.innerHTML = `${close}<h3>${esc(s.name)}${s.destroyed ? ' (ruins)' : ''}</h3>
       <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
       ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
-      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span>${s.port ? '<span class="tag">⚓ Port</span>' : ''}</div><div class="sub" style="margin-top:4px">${esc(W.landName(s))}${W.wildOf(s) ? ` · by ${esc(W.wildOf(s).name)}` : ''}</div>`}
+      <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r && W.knowsRealm(r) ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span>${s.port ? '<span class="tag">⚓ Port</span>' : ''}</div><div class="sub" style="margin-top:4px">${esc(W.landName(s))}${W.wildOf(s) ? ` · by ${esc(W.wildOf(s).name)}` : ''}</div>`}
       ${youVagabond() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${(n => n + ' month' + (n === 1 ? '' : 's'))(W.tripMonths(W.player, s))}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
   } else if (sel.kind === 'march') {
     const m = sel.war.march; if (!m) { sel = null; return card(); }

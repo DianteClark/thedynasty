@@ -164,6 +164,7 @@ function roleLabel(c) {
 }
 function titleTags(c) {
   const t = [];
+  if (!world.knowsTitles(c)) return '';
   if (c.titles.rank) t.push(`<span class="tag title">${esc(c.titles.rank)}</span>`);
   if (c.titles.deed) t.push(`<span class="tag title">★ ${esc(c.titles.deed)}</span>`);
   if (c.titles.rep) t.push(`<span class="tag rep">${esc(c.titles.rep)}</span>`);
@@ -186,7 +187,7 @@ function render(soft = false) {
 
 function renderChronicle() {
   const types = ['all', ...Object.keys(TYPE_LABELS).filter(t => world.chronicle.some(e => e.type === t))];
-  let entries = world.chronicle.filter(e => e.importance >= ui.level && (ui.type === 'all' || e.type === ui.type));
+  let entries = world.chronicle.filter(e => e.importance >= ui.level && (ui.type === 'all' || e.type === ui.type) && world.seesEntry(e));
   const total = entries.length;
   entries = entries.slice(-ui.shown).reverse();
   let html = `<div class="chips">${[[3, 'Major'], [2, 'Notable'], [1, 'Everything']].map(([l, n]) => `<button class="chip ${ui.level === l ? 'on' : ''}" data-level="${l}">${n}</button>`).join('')}</div>
@@ -277,8 +278,10 @@ function mapInfo() {
 }
 
 function renderRealms() {
-  const realms = world.realmList().sort((a, b) => world.realmSetts(b).length - world.realmSetts(a).length || world.realmPop(b) - world.realmPop(a));
-  let html = `<div class="sub" style="margin-bottom:10px">${realms.length} realms stand in year ${world.year}. Sorted by size.</div>`;
+  const all = world.realmList();
+  const realms = all.filter(r => world.knowsRealm(r)).sort((a, b) => world.realmSetts(b).length - world.realmSetts(a).length || world.realmPop(b) - world.realmPop(a));
+  const unknown = all.length - realms.length;
+  let html = `<div class="sub" style="margin-bottom:10px">${all.length} realms stand in year ${world.year}. ${unknown ? `You know of ${realms.length}; the rest you have never heard of. Travel, talk to locals and send spies to learn more.` : 'Sorted by size.'}</div>`;
   for (const r of realms) {
     const ruler = world.char(r.rulerId);
     const wars = world.wars.filter(w => !w.over && (w.a === r.id || w.b === r.id)).map(w => world.realm(w.a === r.id ? w.b : w.a)).filter(Boolean);
@@ -294,10 +297,10 @@ function renderRealms() {
 
 function renderPeople() {
   const q = ui.peopleQuery.toLowerCase();
-  let people = q ? world.living().filter(c => (c.name + ' ' + (c.dynasty || '')).toLowerCase().includes(q)).slice(0, 60) : world.famous(50);
+  let people = q ? world.living().filter(c => world.knowsChar(c) && (c.name + ' ' + (c.dynasty || '')).toLowerCase().includes(q)).slice(0, 60) : world.famous(400).filter(c => world.knowsChar(c)).slice(0, 50);
   const legends = q ? [] : [...world.chars.values()].filter(c => !c.alive && (c.titles.deed || c.fame > 40)).sort((a, b) => b.fame - a.fame).slice(0, 12);
   let html = `<input class="search" id="peopleSearch" placeholder="Search the living by name…" value="${esc(ui.peopleQuery)}">`;
-  html += `<h2 class="sec">${q ? 'Matches' : 'The most renowned'}</h2>`;
+  html += `<h2 class="sec">${q ? 'Matches' : 'The most renowned people you know of'}</h2>`;
   for (const c of people) html += personCard(c);
   if (legends.length) { html += `<h2 class="sec">Remembered dead</h2>`; for (const c of legends) html += personCard(c); }
   view.innerHTML = html;
@@ -315,7 +318,7 @@ function personCard(c) {
 function renderStats() {
   const s = world.stats;
   const items = [['wars', 'Wars declared'], ['battles', 'Battles fought'], ['uprisings', 'Uprisings'], ['assassinations', 'Assassinations'], ['foiled', 'Plots foiled'], ['duels', 'Duels'], ['tournaments', 'Tournaments'], ['marriages', 'Marriages'], ['births', 'Births'], ['deaths', 'Deaths'], ['famines', 'Famines'], ['outbreaks', 'Monster outbreaks'], ['destroyed', 'Settlements destroyed'], ['realmsFallen', 'Realms fallen'], ['realmsRisen', 'Realms risen'], ['defections', 'Betrayals and defections'], ['spies', 'Spy missions']];
-  const titled = world.living().filter(c => c.titles.deed || c.titles.rep);
+  const titled = world.living().filter(c => (c.titles.deed || c.titles.rep) && world.knowsTitles(c));
   const strongest = world.char(world.unique.strongest);
   let html = `<div class="card"><h3>World</h3><div class="sub">Seed “${esc(world.seed)}” · ${SIZES[world.size].label} map · Year ${world.year}</div>
     <div class="kv"><div><b>${world.living().length}</b><small>Living people</small></div><div><b>${world.realmList().length}</b><small>Realms</small></div><div><b>${world.realmList().filter(r => r.tier === 'Kingdom').length}</b><small>Kingdoms</small></div></div></div>`;
@@ -323,10 +326,10 @@ function renderStats() {
   const wildsBy = b => (world.wilds || []).filter(x => x.biome === b && x.size >= 35).sort((a, b) => b.size - a.size).map(x => esc(x.name[0].toUpperCase() + x.name.slice(1)));
   html += `<div class="card"><h3>🗺 Lands and seas</h3><div class="sub">${conts.length} continent${conts.length === 1 ? '' : 's'}: ${conts.map(c => `<b>${esc(c.name)}</b>`).join(', ')}. ${isles.filter(l => l.kind === 'island').length} islands and many small isles. Reaching another landmass means sailing from a port.</div>
     ${[['forest', '🌲 Forests'], ['swamp', '🌫 Marshes'], ['mountain', '⛰ Mountains'], ['tundra', '❄ Frozen wastes'], ['wasteland', '🏜 Badlands']].map(([b, l]) => wildsBy(b).length ? `<div class="sub" style="margin-top:6px"><b>${l}:</b> ${wildsBy(b).slice(0, 8).join(', ')}</div>` : '').join('')}</div>`;
-  html += `<div class="card"><h3>★ Strongest Under Heaven</h3><div class="sub">${strongest && strongest.alive ? `${charPill(strongest)} holds the title. Beat them in a duel to take it.` : 'The title is unclaimed.'}</div></div>`;
+  html += `<div class="card"><h3>★ Strongest Under Heaven</h3><div class="sub">${strongest && strongest.alive ? (world.knowsChar(strongest) ? `${charPill(strongest)} holds the title. Beat them in a duel to take it.` : 'Someone holds the title, but you have not learned who.') : 'The title is unclaimed.'}</div></div>`;
   html += `<div class="stats">${items.map(([k, l]) => `<div class="stat"><b>${s[k].toLocaleString()}</b><small>${l}</small></div>`).join('')}</div>`;
   if (titled.length) {
-    html += `<h2 class="sec">Titles held by the living</h2><div class="card">`;
+    html += `<h2 class="sec">Titles held by the living</h2><div class="sub" style="margin:0 2px 8px">Only the titles you have discovered: by meeting their holders, hearing of their deeds, or spying on their court.</div><div class="card">`;
     for (const c of titled.sort((a, b) => b.fame - a.fame).slice(0, 30)) html += `<div style="margin:6px 0">${charPill(c)} ${titleTags(c)}</div>`;
     html += `</div>`;
   }
@@ -340,6 +343,7 @@ function closeSheet() { $('#sheetWrap').hidden = true; }
 
 function charSheet(id) {
   const c = world.char(id); if (!c) return;
+  if (!world.knowsChar(c)) return openSheet(`<h2>A stranger</h2><div class="sub">You know nothing of this person yet.</div>`);
   const r = world.realm(c.realmId);
   const sp = world.char(c.spouseId);
   const kids = c.children.map(k => world.char(k)).filter(Boolean);
@@ -355,6 +359,7 @@ function charSheet(id) {
     <div class="sub">${esc(roleLabel(c))}</div>
     <div class="sub">${cultureById(c.culture).race}${c.mixed ? ` (${c.mixed.map(m => cultureById(m).race).join('-')} blood)` : ''} · ${c.female ? 'Woman' : 'Man'} · ${c.alive ? `Age ${world.age(c)}` : `Lived ${c.died - c.born} years`} · Level ${c.level}/20 · Fame ${Math.round(c.fame)}</div>
     <div style="margin-top:6px">${titleTags(c)} ${c.traits.map(t => `<span class="tag">${t}</span>`).join('')}${c.wounded ? '<span class="tag war">Wounded</span>' : ''}${c.prisonerOf ? `<span class="tag war">Prisoner of ${esc(world.realm(c.prisonerOf)?.name || '?')}</span>` : ''}${c.wardOf ? `<span class="tag">Ward at ${esc(world.realm(c.wardOf)?.name || '?')}</span>` : ''}</div>
+    ${!world.knowsTitles(c) && (c.titles.rank || c.titles.deed || c.titles.rep) ? '<div class="sub" style="margin-top:4px">They hold titles, but you have not learned which.</div>' : ''}
     <div class="statgrid"><div><b>${st.lea}</b><small>Leadership</small></div><div><b>${st.mig}</b><small>Might</small></div><div><b>${st.int}</b><small>Intellect</small></div><div><b>${st.pol}</b><small>Politics</small></div><div><b>${st.cha}</b><small>Charisma</small></div></div>
     ${c.role === 'officer' ? `<div class="sub">Loyalty to their lord: ${Math.round(c.loyalty)}</div><div class="bar"><div style="width:${c.loyalty}%"></div></div>` : ''}
     ${a ? `<div class="card" style="margin-top:12px"><h3>⚔ Army of ${esc(world.plural(world.unitName(a)))}</h3><div class="kv"><div><b>${a.size}</b><small>Troops</small></div><div><b>${a.level}/10</b><small>Level</small></div><div><b>${world.troopTier(a)}</b><small>Tier</small></div></div><div class="sub" style="margin-top:6px">${a.wins} victories · ${a.losses} defeats</div></div>` : ''}
@@ -376,7 +381,9 @@ function charSheet(id) {
 function realmSheet(id) {
   const r = world.realm(id); if (!r) return;
   const ruler = world.char(r.rulerId), heir = world.char(r.heirId);
-  const offs = world.realmOfficers(r).filter(o => o.id !== r.rulerId).sort((a, b) => world.power(b) - world.power(a));
+  if (!world.knowsRealm(r)) return openSheet(`<h2>An unknown realm</h2><div class="sub">You have never heard of it.</div>`);
+  const allOffs = world.realmOfficers(r).filter(o => o.id !== r.rulerId).sort((a, b) => world.power(b) - world.power(a));
+  const offs = allOffs.filter(o => world.knowsChar(o)), hidden = allOffs.length - offs.length;
   const setts = world.realmSetts(r).sort((a, b) => b.pop - a.pop);
   const wars = world.wars.filter(w => !w.over && (w.a === r.id || w.b === r.id));
   const mercs = r.mercs.map(m => world.mercs.find(x => x.id === m)).filter(Boolean);
@@ -392,7 +399,8 @@ function realmSheet(id) {
     </div>
     <h2 class="sec">Officers and their armies</h2>
     ${ruler && ruler.army ? officerRow(ruler) : ''}
-    ${offs.length ? offs.map(officerRow).join('') : '<div class="sub">No officers serve this realm.</div>'}
+    ${offs.length ? offs.map(officerRow).join('') : allOffs.length ? '' : '<div class="sub">No officers serve this realm.</div>'}
+    ${hidden ? `<div class="sub">${hidden} more officer${hidden === 1 ? '' : 's'} you know nothing about. A spy could learn their names and strength.</div>` : ''}
     <h2 class="sec">Holdings</h2>
     ${setts.map(s => `<div class="card"><b>${esc(s.name)}</b>${s.id === r.capital ? ' ◆' : ''} <span class="sub">· ${s.pop} people · unrest ${Math.round(s.unrest)}${s.famine ? ' · <span style="color:#ffcf70">famine</span>' : ''} · guard ${s.guard}</span></div>`).join('')}
   `);

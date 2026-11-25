@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.2
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.3
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -183,4 +183,13 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **Officers on the march** each ride with a couple of their soldiers, so a host shows who leads it.
 - **Two ways in:** start on the first day of Year 1, or be dropped into a world that has lived through a random 30 to 100 years.
 - **The world waits only when it must:** for your battles, a duel challenge, or the end of your line. Everything else arrives as a notice while time keeps running.
+
+## 2.3: knowledge and the cartographer's map
+
+- **Fog of war:** you start knowing only the land around you (and your own realm, if you rule one). Everything else is blank parchment. Land you travel through stays drawn on your map for good, and your spies and agents chart the roads they take.
+- **Maps go out of date:** when an earthquake, wildfire or flood changes an area, word reaches you that your maps of it can't be trusted, and that land fogs over until you see it again.
+- **Limited knowledge of realms:** you know the great kingdoms of the age and anything whose holdings you have seen. Locals tell you about the realms around them when you arrive somewhere. The Realms tab lists only what you know of.
+- **Limited knowledge of people:** you know your own circle, the rulers of realms you know, the truly famous, and anyone whose deeds have reached you. News of great events travels everywhere; lesser news reaches you only if it's about someone you know. The Chronicle and the People tab follow the same rules.
+- **Titles must be discovered:** you learn what titles someone holds by meeting them, hearing of their deeds, or having a spy bring back the names and titles of their whole court. Stats still shows world numbers, but only the titles you've discovered.
+- Saves from before 2.3 keep knowing the whole world.
 
