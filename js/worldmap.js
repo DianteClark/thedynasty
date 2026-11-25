@@ -412,7 +412,7 @@ function card() {
       <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
       ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
       <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r && W.knowsRealm(r) ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span>${s.port ? '<span class="tag">⚓ Port</span>' : ''}</div><div class="sub" style="margin-top:4px">${esc(W.landName(s))}${W.wildOf(s) ? ` · by ${esc(W.wildOf(s).name)}` : ''}</div>`}
-      ${youVagabond() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${(n => n + ' month' + (n === 1 ? '' : 's'))(W.tripMonths(W.player, s))}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
+      ${youCanTravel() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${(n => n + ' month' + (n === 1 ? '' : 's'))(W.tripMonths(W.player, s))}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
   } else if (sel.kind === 'march') {
     const m = sel.war.march; if (!m) { sel = null; return card(); }
     const att = W.realm(m.att), def = W.realm(m.def), tgt = W.sett(m.target);
@@ -439,6 +439,7 @@ function card() {
       ${youVagabond() ? `<div class="abtns">${['slay', 'trap', 'tame'].filter(a => a === 'slay' || (a === 'tame' ? MON[L.key].tame : !MON[L.key].rift && L.key !== 'dragon')).map(a => `<button class="abtn" data-wact='${JSON.stringify({ type: 'contract', kind: 'lair', id: L.id, approach: a })}'>${a[0].toUpperCase() + a.slice(1)} · ${Math.round(W.huntOdds(L, a) * 100)}%</button>`).join('')}</div>` : ''}`;
   }
 }
+function youCanTravel() { const p = W.player; return p && p.alive && !p.prisonerOf && !W.gameOver; }
 function youVagabond() { const p = W.player; return p && p.alive && p.role === 'vagabond' && !W.gameOver; }
 export function debugCam() { return cam; }
 export function refreshCard() { if (root && sel) card(); }

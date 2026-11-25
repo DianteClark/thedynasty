@@ -2,7 +2,8 @@ import { World, SIZES, TROOP_TIERS, MONTHS } from './sim.js';
 import { cultureById } from './names.js';
 import { renderBattleSetup, handleBattleSetupClick, watchBattle, commandBattle } from './battleview.js';
 import { mountMap, unmountMap, setWorld, refreshCard, debugCam } from './worldmap.js';
-import { renderYou, renderCreation, readForm, handleFormClick, setStance } from './you.js';
+import { renderYou, renderCreation, readForm, handleFormClick, setStance, renderCourt, decisionCard } from './you.js';
+import { portrait } from './portrait.js';
 import { watchDuels } from './duelview.js';
 import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod, setMod, MAX_SLOTS } from './store.js';
 
@@ -13,7 +14,7 @@ const MONTH_MS = 60000; // one month of the world passes every minute
 const TYPE_LABELS = { you: 'You', war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
 let world, playing = true, busy = false, tab = 'you', acc = 0, watchMode = 'big', creatingLife = false;
-const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null };
+const ui = { level: 2, type: 'all', shown: 60, peopleQuery: '', mapSel: null, worldSub: 'realms' };
 
 // ---------- save / load ----------
 // The sim is deterministic: a seed, your actions and your battle choices rebuild the world exactly.
@@ -113,6 +114,7 @@ function resolvePending() {
 }
 let pendingChoice = null;
 let lastFrame = 0, lastCount = 0, lastChallenge = '';
+const seenDecisions = new Set();
 // The world runs in real time: you can pause it, but never hurry it.
 function loop(t) {
   const dt = Math.min(250, t - (lastFrame || t)); lastFrame = t;
@@ -134,8 +136,11 @@ function monthPasses() {
   // a few things need an answer from you: the world waits for those
   const ch = p && p.challenge ? JSON.stringify(p.challenge) : '';
   if ((ch && ch !== lastChallenge) || world.gameOver) { lastChallenge = ch; playing = false; setPlayBtn(); render(); if (ch) toast('You have been challenged. The world waits for your answer on the You tab.', 'you'); }
+  const ids = world.decisionsFor().map(d => d.id); const fresh = ids.filter(id => !seenDecisions.has(id));
+  if (fresh.length) { for (const id of fresh) seenDecisions.add(id); const d = world.decisions.find(x => x.id === fresh[0]); $('#btnDecide').classList.remove('new'); void $('#btnDecide').offsetWidth; $('#btnDecide').classList.add('new'); toast(`📜 ${d.title}${fresh.length > 1 ? ` (+${fresh.length - 1} more)` : ''}. Tap 📜 to decide.`, 'you'); }
+  if (!$('#sheetWrap').hidden && $('#sheet').dataset.kind === 'decisions') decisionsSheet();
   const n = world.chronicle.filter(x => x.importance >= ui.level).length;
-  if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || tab === 'you') { lastCount = n; render(tab !== 'you'); }
+  if (tab === 'map' || (tab === 'chronicle' && n !== lastCount) || tab === 'you' || tab === 'court') { lastCount = n; render(tab === 'map' || tab === 'chronicle'); }
   save();
 }
 function setPlayBtn() { const b = $('#btnPlay'); b.textContent = playing ? '❚❚' : '▶'; b.setAttribute('aria-label', playing ? 'Pause' : 'Resume'); document.querySelector('.clock').classList.toggle('paused', !playing); }
@@ -147,6 +152,15 @@ function updateHeader() {
   const label = `Day ${day} of ${MONTHS[world.month]}, Year ${world.year}`;
   if (label !== lastDate) { lastDate = label; $('#date').textContent = label; $('#season').textContent = world.season + (playing || !world.playerId ? '' : ' · paused'); }
   $('#monthBar').style.width = ((world._frac || 0) * 100).toFixed(1) + '%';
+  const nd = world.playerId && !world.gameOver ? world.decisionsFor().length : 0;
+  const b = $('#btnDecide'); if (b.hidden !== !nd) b.hidden = !nd; const dc = $('#dcount'); if (dc.textContent !== String(nd)) dc.textContent = nd;
+  const cl = $('#courtLabel'); const lbl = world.playerRules && world.playerRules() ? 'Court' : 'Camp'; if (cl.textContent !== lbl) cl.textContent = lbl;
+}
+function decisionsSheet() {
+  const list = world.decisionsFor();
+  if (!list.length) { closeSheet(); return; }
+  openSheet(`<h2>📜 Matters awaiting you</h2><div class="sub" style="margin-bottom:10px">Time keeps running. Leave a matter too long and it is settled without you.</div>${list.map(d => decisionCard(world, d, !d.court || world.atSeat())).join('')}`);
+  $('#sheet').dataset.kind = 'decisions';
 }
 function selectTab() { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab)); }
 
@@ -180,9 +194,8 @@ function render(soft = false) {
   if (tab === 'you') { if (creatingLife) renderCreation(view, world, true); else renderYou(view, world); }
   else if (tab === 'chronicle') renderChronicle();
   else if (tab === 'map') { if (!soft) mountMap(view, world, { realm: realmSheet, char: charSheet, act: doAct }); else refreshCard(); }
-  else if (tab === 'realms') renderRealms();
-  else if (tab === 'people') renderPeople();
-  else if (tab === 'stats') renderStats();
+  else if (tab === 'court') renderCourt(view, world);
+  else if (tab === 'world') renderWorld();
   else if (tab === 'battle' && !soft) renderBattleSetup(view);
 }
 
@@ -278,6 +291,10 @@ function mapInfo() {
   </div>`;
 }
 
+function renderWorld() {
+  if (ui.worldSub === 'people') renderPeople(); else if (ui.worldSub === 'stats') renderStats(); else renderRealms();
+  view.insertAdjacentHTML('afterbegin', `<div class="subtabs chips">${[['realms', '🏰 Realms'], ['people', '👑 People'], ['stats', '📊 Stats']].map(([k, l]) => `<button class="chip ${ui.worldSub === k ? 'on' : ''}" data-wsub="${k}">${l}</button>`).join('')}</div>`);
+}
 function renderRealms() {
   const all = world.realmList();
   const realms = all.filter(r => world.knowsRealm(r)).sort((a, b) => world.realmSetts(b).length - world.realmSetts(a).length || world.realmPop(b) - world.realmPop(a));
@@ -306,14 +323,14 @@ function renderPeople() {
   if (legends.length) { html += `<h2 class="sec">Remembered dead</h2>`; for (const c of legends) html += personCard(c); }
   view.innerHTML = html;
   const inp = $('#peopleSearch');
-  inp.addEventListener('input', () => { ui.peopleQuery = inp.value; const pos = inp.selectionStart; renderPeople(); const i2 = $('#peopleSearch'); i2.focus(); i2.setSelectionRange(pos, pos); });
+  inp.addEventListener('input', () => { ui.peopleQuery = inp.value; const pos = inp.selectionStart; renderWorld(); const i2 = $('#peopleSearch'); i2.focus(); i2.setSelectionRange(pos, pos); });
 }
 function personCard(c) {
-  return `<div class="card tap" data-char="${c.id}">
+  return `<div class="card tap" data-char="${c.id}" style="display:flex;gap:10px">${portrait(c, 40)}<div style="flex:1">
     <h3>${esc(c.name)}${c.dynasty ? ' ' + esc(c.dynasty) : ''} <small class="sub">${c.alive ? world.age(c) : '†'}</small></h3>
     <div class="sub">${esc(roleLabel(c))} · ${cultureById(c.culture).race}${c.mixed ? ' (mixed blood)' : ''} · Fame ${Math.round(c.fame)}</div>
     <div>${titleTags(c)}</div>
-  </div>`;
+  </div></div>`;
 }
 
 function renderStats() {
@@ -339,7 +356,7 @@ function renderStats() {
 }
 
 // ---------- detail sheets ----------
-function openSheet(html, locked = false) { $('#sheet').innerHTML = `<div class="grab"></div>${locked ? '' : '<button class="close" data-close>✕</button>'}` + html; $('#sheetWrap').hidden = false; $('#sheetWrap').dataset.locked = locked ? '1' : ''; $('#sheet').scrollTop = 0; }
+function openSheet(html, locked = false) { $('#sheet').dataset.kind = ''; $('#sheet').innerHTML = `<div class="grab"></div>${locked ? '' : '<button class="close" data-close>✕</button>'}` + html; $('#sheetWrap').hidden = false; $('#sheetWrap').dataset.locked = locked ? '1' : ''; $('#sheet').scrollTop = 0; }
 function closeSheet() { $('#sheetWrap').hidden = true; }
 
 function charSheet(id) {
@@ -356,8 +373,8 @@ function charSheet(id) {
   const friends = Object.entries(c.rel).filter(([, v]) => v >= 50).map(([k]) => world.char(+k)).filter(x => x && x.alive && x.id !== c.spouseId).slice(0, 5);
   const story = c.log.map(i => world.chronicle[i]).filter(Boolean).slice(-25).reverse();
   openSheet(`
-    <h2>${esc(c.name)}${c.dynasty ? ' ' + esc(c.dynasty) : ''}</h2>
-    <div class="sub">${esc(roleLabel(c))}</div>
+    <div style="display:flex;gap:12px;align-items:center">${portrait(c, 64)}<div><h2 style="margin:0">${esc(c.name)}${c.dynasty ? ' ' + esc(c.dynasty) : ''}</h2>
+    <div class="sub">${esc(roleLabel(c))}</div></div></div>
     <div class="sub">${cultureById(c.culture).race}${c.mixed ? ` (${c.mixed.map(m => cultureById(m).race).join('-')} blood)` : ''} · ${c.female ? 'Woman' : 'Man'} · ${c.alive ? `Age ${world.age(c)}` : `Lived ${c.died - c.born} years`} · Level ${c.level}/20 · Fame ${Math.round(c.fame)}</div>
     <div style="margin-top:6px">${titleTags(c)} ${c.traits.map(t => `<span class="tag">${t}</span>`).join('')}${c.wounded ? '<span class="tag war">Wounded</span>' : ''}${c.prisonerOf ? `<span class="tag war">Prisoner of ${esc(world.realm(c.prisonerOf)?.name || '?')}</span>` : ''}${c.wardOf ? `<span class="tag">Ward at ${esc(world.realm(c.wardOf)?.name || '?')}</span>` : ''}</div>
     ${!world.knowsTitles(c) && (c.titles.rank || c.titles.deed || c.titles.rep) ? '<div class="sub" style="margin-top:4px">They hold titles, but you have not learned which.</div>' : ''}
@@ -429,7 +446,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v2.4. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.5. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 
@@ -451,6 +468,7 @@ document.addEventListener('click', ev => {
   if (t.dataset.watchDuel) { const e = world.chronicle[+t.dataset.watchDuel]; return watchDuels(e.duels, e.duels.length > 1 ? 'The tournament' : 'A duel'); }
   if (t.dataset.act) { const a = JSON.parse(t.dataset.act); if (t.dataset.confirm && !window.confirm(t.dataset.confirm)) return; return doAct(a); }
   if (t.dataset.tab) { if (tab === 'map' && t.dataset.tab !== 'map') unmountMap(); tab = t.dataset.tab; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === t)); ui.shown = 60; window.scrollTo(0, 0); return render(); }
+  if (t.dataset.wsub) { ui.worldSub = t.dataset.wsub; return renderWorld(); }
   if (t.dataset.level) { ui.level = +t.dataset.level; ui.shown = 60; return renderChronicle(); }
   if (t.dataset.type) { ui.type = t.dataset.type; ui.shown = 60; return renderChronicle(); }
   if (t.id === 'moreBtn') { ui.shown += 80; return renderChronicle(); }
@@ -468,12 +486,14 @@ const ready = () => world && world.playerId && !busy;
 $('#btnPlay').onclick = () => { if (!ready()) return; playing = !playing; lastDate = ''; setPlayBtn(); };
 window.dynastySkip = m => ready() && runMonths(m); // for testing only: the game itself never skips time
 $('#btnWorld').onclick = () => !busy && (world ? worldSheet() : savesOnlySheet());
+$('#btnDecide').onclick = () => { $('#btnDecide').classList.remove('new'); if (world) decisionsSheet(); };
 function savesOnlySheet() {
   openSheet(`<h2>Saves</h2>${slots().list.map(x => `<div class="card"><b>${esc(x.who)}</b><div class="sub">Year ${x.year} · seed “${esc(x.seed)}”</div><div class="abtns"><button class="abtn" data-load-slot="${x.id}">Continue</button><button class="abtn" data-del-slot="${x.id}">Delete</button></div></div>`).join('') || '<div class="sub">No saves yet.</div>'}`);
 }
 function doAct(a) {
   world.lastPlayerDuel = null;
   const msg = world.act(a); save(); render(tab === 'map'); if (tab === 'map') refreshCard(); if (msg) toast(msg);
+  if (!$('#sheetWrap').hidden && $('#sheet').dataset.kind === 'decisions') decisionsSheet();
   if (world.lastPlayerDuel && (a.type === 'challenge' || a.type === 'answer')) watchDuels([world.lastPlayerDuel], 'Your duel');
 }
 

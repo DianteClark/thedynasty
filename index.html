@@ -19,7 +19,7 @@
   <header class="top">
     <div class="brand">
       <h1>The Dynasty</h1>
-      <button class="icon-btn" id="btnWorld" aria-label="New world">⚙</button>
+      <div class="hbtns"><button class="icon-btn dbadge" id="btnDecide" aria-label="Decisions waiting" hidden>📜 <b id="dcount">0</b></button><button class="icon-btn" id="btnWorld" aria-label="Settings and saves">⚙</button></div>
     </div>
     <div class="clock">
       <button id="btnPlay" class="ctl primary" aria-label="Pause">❚❚</button>
@@ -32,11 +32,10 @@
 
   <nav class="tabs" id="tabs">
     <button data-tab="map"><span>🗺</span>Map</button>
-    <button data-tab="you" class="on"><span>🛡</span>You</button>
+    <button data-tab="court"><span>🏰</span><i id="courtLabel">Court</i></button>
+    <button data-tab="you" class="on"><span>🛡</span>Household</button>
     <button data-tab="chronicle"><span>📜</span>Chronicle</button>
-    <button data-tab="realms"><span>🏰</span>Realms</button>
-    <button data-tab="people"><span>👑</span>People</button>
-    <button data-tab="stats"><span>📊</span>Stats</button>
+    <button data-tab="world"><span>👑</span>World</button>
   </nav>
 
   <div class="sheet-wrap" id="sheetWrap" hidden>

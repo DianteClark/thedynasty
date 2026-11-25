@@ -4,6 +4,7 @@ import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js
 import { Battle, UNITS, layoutBases, fieldFor, BASE_LAYOUTS, BASE_CAPS } from './battle.js';
 import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
 import { installKnowledge } from './know.js';
+import { installCourt, COURT_ACTS } from './court.js';
 
 // ---------- Seeded random ----------
 function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
@@ -404,6 +405,7 @@ export class World {
     this.playerTick();
     this.monthlyLife();
     if (this.kn) this.knowledgeTick();
+    if (this.playerId) { this.jobsTick(); this.councilTick(); this.decisionsTick(); }
     if (this.month === 4) this.planTournaments();
     if (this.month === 6) this.tournaments();
     if (this.month % 3 === 0) this.updateTiers();
@@ -768,7 +770,9 @@ export class World {
         this.log(2, 'merc', `${m.name} takes ${def.name}'s gold and turns on ${att.name} mid-war.`, [m.captainId]);
       }
     }
-    const aOff = this.realmOfficers(att).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
+    // you only ride to war yourself if you've chosen to lead in person
+    const inPerson = o => !this.isPlayer(o) || o.role !== 'ruler' || this.realm(o.realmId)?.leadInPerson;
+    const aOff = this.realmOfficers(att).filter(o => !o.wounded && inPerson(o)).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
     const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
     if (!aOff.length) return;
     const targets = this.realmSetts(def).sort((x, y) => Math.min(...this.realmSetts(att).map(s => this.dist(s, x))) - Math.min(...this.realmSetts(att).map(s => this.dist(s, y))));
@@ -1546,6 +1550,7 @@ export class World {
     const fn = this['act_' + a.type];
     if (!fn) return 'Unknown action.';
     if (a.type !== 'start' && (!this.player || !this.player.alive)) return 'You are no longer among the living.';
+    if (COURT_ACTS.includes(a.type) && this.playerRules() && !this.atSeat()) return `That has to be done from your seat. ${this.awayReason()} Your steward rules until you return.`;
     const out = fn.call(this, a) || '';
     if (a.type === 'start' && this.player) this.initKnowledge();
     return out;
@@ -1707,7 +1712,8 @@ export class World {
 
   // ---------- vagabond life ----------
   act_travel(a) {
-    const p = this.player, s = this.sett(a.to); if (!s || p.role !== 'vagabond') return 'Only a wanderer can take to the road like this.';
+    const p = this.player, s = this.sett(a.to); if (!s || s.destroyed) return 'There is nothing there to travel to.';
+    if (p.prisonerOf) return 'You are a prisoner.';
     p.task = { type: 'travel', to: s.id };
     const months = this.tripMonths(p, s);
     return `You set out for ${s.name}. About ${months} month${months === 1 ? '' : 's'} on the road${landAt(this, p) !== landAt(this, s) ? ', with a sea crossing' : ''}.`;
@@ -1976,9 +1982,9 @@ export class World {
       if (n <= 0) return (r.reserve || 0) >= this.reserveCap(r) ? 'Your reserve is as large as your lands can keep.' : 'Your people have given all the levies they can this year.';
       const cost = Math.ceil(n / 2); if (r.treasury < cost) return `Raising ${n} troops costs ${cost} gold.`;
       if (r.leviedYear !== this.year) { r.leviedYear = this.year; r.levied = 0; }
-      r.levied += n; r.treasury -= cost; r.reserve = (r.reserve || 0) + n;
+      r.levied += n; r.treasury -= cost; this.later(1, { kind: 'reserve', realm: r.id, n });
       for (const s of this.realmSetts(r)) s.pop = Math.max(30, s.pop - Math.round(n / r.setts.size));
-      return `${n} men join your own reserve. It now numbers ${r.reserve}.`;
+      return `${n} men are called up for your reserve. They'll be drilled and in the ranks within a month.`;
     }
     const o = this.char(a.id); if (!o || !o.army || o.realmId !== r.id) return 'They command no army.';
     const room = this.troopCap(o) - o.army.size;
@@ -1989,17 +1995,18 @@ export class World {
     if (r.leviedYear !== this.year) { r.leviedYear = this.year; r.levied = 0; }
     r.levied += n; r.treasury -= cost;
     // fresh recruits dilute experience a little
-    const a0 = o.army; a0.xp = Math.round(a0.xp * a0.size / (a0.size + n)); a0.size += n;
+    const a0 = o.army; a0.xp = Math.round(a0.xp * a0.size / (a0.size + n)); this.later(1, { kind: 'officer', realm: r.id, id: o.id, n });
     for (const s of this.realmSetts(r)) s.pop = Math.max(30, s.pop - Math.round(n / r.setts.size));
-    return `${n} new ${this.plural(this.unitName(a0))} join ${o.name}'s army.`;
+    return `${n} recruits are called up for ${o.name}'s ${this.plural(this.unitName(a0))}. They'll arrive within a month.`;
   }
+  act_lead(a) { const r = this.playerRealm(); if (!r) return ''; r.leadInPerson = !!a.on; return a.on ? 'You will ride with your armies. Your steward rules while you are away.' : 'Your officers will lead your armies. You stay at your seat.'; }
   act_fortify(a) {
     const r = this.playerRealm(), s = this.sett(a.sett); if (!r || !s || s.realmId !== r.id) return 'That is not yours to fortify.';
     const n = Math.min(a.n || 100, this.garrisonCap(s) - (s.garrison || 0));
     if (n <= 0) return `${s.name} holds all the garrison it can (${this.garrisonCap(s)}).`;
     const cost = Math.ceil(n / 3); if (r.treasury < cost) return `Garrisoning ${n} more troops costs ${cost} gold.`;
-    r.treasury -= cost; s.garrison = (s.garrison || 0) + n;
-    return `${n} more troops man the walls of ${s.name} (${s.garrison} in all).`;
+    r.treasury -= cost; this.later(1, { kind: 'garrison', realm: r.id, sett: s.id, n });
+    return `${n} more troops are sent to the walls of ${s.name}. They'll be in place within a month.`;
   }
   act_transfer(a) {
     const r = this.playerRealm(), from = this.char(a.from), to = this.char(a.to);
@@ -2322,3 +2329,4 @@ export class World {
 
 export { TROOP_TIERS, GUARD, MON };
 installKnowledge(World);
+installCourt(World);

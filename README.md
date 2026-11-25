@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.4
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.5
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -8,9 +8,9 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 
 ## How to play
 
-1. **Create your character** on the 🛡 You tab: origin, culture (ten of them), name, and ironman or casual.
+1. **Create your character** on the 🛡 Household tab: origin, culture (ten of them), name, and ironman or casual.
 2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every minute. You can pause (❚❚), but you can't hurry time: you only control yourself.
-3. **Act** from the You tab, or by tapping things on the 🗺 Map: travel, take contracts, raise armies, marry, scheme, fight.
+3. **Act** from the 🏰 Court (or Camp, if you don't rule), the 🛡 Household tab, or by tapping things on the 🗺 Map. Matters that need an answer collect under 📜 at the top: answer them before their deadline or they are settled without you.
 4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
 5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
 
@@ -205,4 +205,16 @@ Everyone on a mission now travels the map, and can be stopped on the way.
 - **Camera:** zooms out to Mid at most. The officer cards at the bottom (with portraits) scroll sideways; tap one to jump to their troops. When watching, the camera follows the fighting.
 - **On your You tab:** each officer's troop cap, your reserve (raise it with levies), and the garrison of each holding (fortify it with gold).
 - **Practice:** the battle sandbox has base layouts too.
+
+## 2.5: decisions, the court, and being there
+
+- **Pace:** one month every minute (a session covers a few years; a reign is about six hours), and travel is about 2.5 times faster.
+- **Decisions with deadlines:** matters that need you arrive as cards under 📜 at the top of the screen. Time keeps running; leave one too long and it is settled without you. Only battles, duels and the end of your line pause the world.
+- **Your council speaks up:** each season your steward, captain and spymaster bring proposals: grain for a starving village, taxes, men for the war, walls for an exposed holding, locking down the gates against a plot, a spy in the enemy court.
+- **Being there matters:** you can only rule from your seat. Ride out, travel or march with your army and your steward rules in your place, settling court business with their own judgment. The Court screen shows where you are and offers the road home.
+- **Lead in person, or not:** choose whether you ride to war with your armies (big bonuses, real danger, and you're away from court) or let your officers lead.
+- **Orders take time:** troops you levy, recruits for your officers and new garrisons arrive a month later.
+- **Rulers and officers can travel** anywhere now, not just vagabonds.
+- **New tabs:** Map · Court (Camp if you don't rule) · Household (you, your family, your successor, your honour) · Chronicle · World (realms, people and stats).
+- **Portraits:** every character has a face from the HAS hero portrait sheets, matched to their culture and sex.
 

@@ -1,6 +1,7 @@
 // The "You" tab: create your character, see your life, act, name a successor.
 import { CULTURES, cultureById } from './names.js';
-import { SIZES, MON } from './sim.js';
+import { SIZES, MON, MONTHS } from './sim.js';
+import { portrait } from './portrait.js';
 import { UNITS } from './battle.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -71,7 +72,7 @@ export function renderYou(view, w) {
   const story = p.log.map(i => w.chronicle[i]).filter(Boolean).slice(-10).reverse();
   let html = `
     <div class="card hero-card">
-      <div style="display:flex;gap:10px;align-items:center">${unitIcon(p.army ? p.army.faction : p.culture, p.army ? p.army.unit : w.pickUnitView(p), 48)}<div style="flex:1">
+      <div style="display:flex;gap:10px;align-items:center">${portrait(p, 56)}<div style="flex:1">
         <h3>${esc(p.name)}${p.dynasty ? ' ' + esc(p.dynasty) : ''}</h3>
         <div class="sub">${esc(roleLine(w, p))}</div>
         <div class="sub">${cultureById(p.culture).race} · age ${w.age(p)} · level ${p.level}/20 · fame ${Math.round(p.fame)} · ${w.mode === 'ironman' ? 'Ironman' : `Casual${w.spared ? ' (spare used)' : ''}`}</div></div></div>
@@ -93,7 +94,7 @@ export function renderYou(view, w) {
     <div class="sub">${succ ? `${esc(w.fullName(succ))} ${sv.ok ? '<span class="tag title">ready</span>' : `<span class="tag war">${esc(sv.why)}</span>`}` : '<span class="tag war">No one. If you die now, your line ends.</span>'}</div>
     ${cands.length ? `<div class="chips" style="margin-top:8px">${cands.map(c => { const v = w.successorValid(p, c.c); return `<button class="chip ${succ && succ.id === c.c.id ? 'on' : ''}" data-y="successor" data-id="${c.c.id}">${esc(c.c.name)} · ${c.why}${v.ok ? '' : ' ⚠'}</button>`; }).join('')}</div>` : '<div class="sub" style="margin-top:6px">Marry, have children, swear an oath or gather companions to have someone to pass your story to.</div>'}
   </div>`;
-  html += `<h2 class="sec">What will you do?</h2>` + honour(w, p) + actions(w, p, r, rules) + dynasty(w, p);
+  html += `<h2 class="sec">Household and honour</h2>` + honour(w, p) + family(w, p, r) + marriage(w, p) + dynasty(w, p);
   html += `<h2 class="sec">Your story</h2>${story.map(e => `<div class="entry i${e.importance}"><div class="meta">Year ${e.y}</div>${esc(e.text)}${e.duels ? `<div class="who"><button class="pill" data-watch-duel="${w.chronicle.indexOf(e)}">▶ Watch ${e.duels.length > 1 ? `the ${e.duels.length} bouts` : 'the duel'}</button></div>` : ''}</div>`).join('') || '<div class="sub">Your story is only beginning.</div>'}`;
   view.innerHTML = html;
 }
@@ -140,18 +141,59 @@ function actions(w, p, r, rules) {
       <div class="chips">${['Light', 'Watchful', 'Locked Down'].map(l => `<button class="chip ${(r.guardChoice || 'Light') === l ? 'on' : ''}" data-act='${JSON.stringify({ type: 'guard', level: l })}'>${l}</button>`).join('')}</div>
       ${hire.length ? `<div class="sub" style="margin-top:6px">Wanderers who would serve you (40 gold):</div><div class="abtns">${hire.map(v => btn(`${esc(v.name)} (Lead ${v.stats.lea}, Might ${v.stats.mig})`, { type: 'recruit', id: v.id })).join('')}</div>` : ''}
       ${r.tier !== 'Village' ? `<div class="arow"><div><b>Host a tournament</b><div class="sub">80 gold. Fame, marriage offers, and a crowd an assassin could hide in.</div></div>${btn('Host', { type: 'tournament' })}</div>` : ''}</div>`;
-    h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r) + family(w, p, r);
+    h += council(w, r) + granaries(w, r) + armies(w, r) + intrigue(w, p, r);
     h += `<div class="card"><h3>⚔ War and peace</h3>
       ${wars.map(x => { const o = w.realm(x.a === r.id ? x.b : x.a); const sc = x.a === r.id ? x.score : -x.score; return `<div class="arow"><div><b>At war with ${esc(o.name)}</b><div class="sub">${esc(x.reason)} · ${x.battles} battle(s) · ${sc > 0 ? 'you are winning' : sc < 0 ? 'you are losing' : 'evenly matched'}</div></div></div>
         <div class="abtns">${btn('Offer peace', { type: 'peaceTerms', realm: o.id, terms: 'white' })}${btn('Pay 100 gold', { type: 'peaceTerms', realm: o.id, terms: 'gold' })}${btn('Cede a holding', { type: 'peaceTerms', realm: o.id, terms: 'cede' }, 'data-confirm="Give up a holding for peace?"')}${btn('Send a child as ward', { type: 'peaceTerms', realm: o.id, terms: 'ward' })}</div>`; }).join('')}
       ${neigh.length ? `<div class="sub">Declare war on a neighbour (strength: yours ${Math.round(w.realmStrength(r)).toLocaleString()}):</div><div class="abtns">${neigh.slice(0, 6).map(o => btn(`${esc(o.name)} (${Math.round(w.realmStrength(o)).toLocaleString()})${r.allies.has(o.id) ? ' · ally!' : ''}`, { type: 'war', realm: o.id }, `data-confirm="Declare war on ${esc(o.name)}?"`)).join('')}</div>` : '<div class="sub">No neighbours within reach.</div>'}
       ${villages.length ? `<div class="sub" style="margin-top:8px">Win over a free village (once a year; charisma, fame and past kindness help):</div><div class="abtns">${villages.slice(0, 5).map(o => btn(esc(o.name), { type: 'persuade', realm: o.id })).join('')}</div>` : ''}</div>`;
   }
+  return h;
+}
+
+function marriage(w, p) {
+  let h = '';
   if (!p.spouseId) {
     const cands = w.marriageCandidates(p).slice(0, 5);
     if (cands.length) h += `<div class="card"><h3>💍 Marriage</h3><div class="sub">A match brings heirs, and between ruling houses, an alliance.</div><div class="abtns">${cands.map(c => btn(`${esc(c.name)}${c.dynasty ? ' ' + esc(c.dynasty) : ''} (${c.role === 'ruler' ? 'ruler' : c.role}, ${w.age(c)})`, { type: 'marry', id: c.id })).join('')}</div></div>`;
   }
   return h;
+}
+
+// ---------- 2.5 the Court (or Camp) ----------
+export function decisionCard(w, d, canAct) {
+  const who = d.who != null ? w.char(d.who) : null; const left = d.due - w.monthIndex;
+  const when = d.court && !w.atSeat() ? 'Your steward will settle this if you stay away' : left <= 0 ? 'Decide now' : `Decide within ${left} month${left === 1 ? '' : 's'} (by ${MONTHS[(w.month + left) % 12]})`;
+  return `<div class="card dcard ${left <= 1 ? 'late' : ''}">${who ? portrait(who, 44) : '<span class="portrait" style="width:44px;height:44px;display:grid;place-items:center;font-size:22px">📜</span>'}
+    <div><h3>${esc(d.title)}</h3><div class="when">${esc(when)}</div><div class="sub" style="margin-top:4px">${esc(d.text)}</div></div>
+    <div class="abtns">${d.options.map(o => `<button class="abtn" ${canAct ? `data-act='${esc(JSON.stringify({ type: 'decide', id: d.id, choice: o.id }))}'` : 'disabled'}>${esc(o.label)}</button>`).join('')}</div></div>`;
+}
+export function renderCourt(view, w) {
+  if (!w || !w.playerId || w.gameOver) return renderYou(view, w);
+  const p = w.player, r = w.playerRealm(), rules = w.playerRules();
+  const all = w.decisionsFor();
+  let html = '';
+  if (rules) {
+    const here = w.atSeat(), cap = w.sett(r.capital);
+    html += here
+      ? `<div class="card hero-card"><h3>🏰 The hall of ${esc(cap.name)}</h3><div class="sub">You hold court. Your council brings you business each season, and what you order takes time to happen.</div>${leadToggle(r)}</div>`
+      : `<div class="card away"><h3>🏰 Away from ${esc(cap ? cap.name : 'your seat')}</h3><div class="sub">${esc(w.awayReason())} Your steward ${w.steward(r) ? esc(w.steward(r).name) : '(none appointed: your realm drifts)'} rules in your place and settles court business after a month.</div>
+        ${!p.task && cap ? `<div class="abtns" style="margin-top:8px">${btn(`Return to ${esc(cap.name)} · ${w.tripMonths(p, cap)} mo`, { type: 'travel', to: cap.id })}</div>` : ''}${leadToggle(r)}</div>`;
+    const court = all.filter(d => d.court);
+    html += `<h2 class="sec">Court business</h2>` + (court.length ? court.map(d => decisionCard(w, d, here)).join('') : '<div class="sub" style="margin:0 2px 10px">Nothing waits on you. Your council will speak up as the seasons turn.</div>');
+    const other = all.filter(d => !d.court);
+    if (other.length) html += `<h2 class="sec">Other matters</h2>` + other.map(d => decisionCard(w, d, true)).join('');
+    if (here) html += `<h2 class="sec">Rule</h2>` + actions(w, p, r, rules);
+    else html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Tap any settlement on the Map to travel there.</div></div>`;
+  } else {
+    if (all.length) html += `<h2 class="sec">Matters for you</h2>` + all.map(d => decisionCard(w, d, true)).join('');
+    html += actions(w, p, r, rules);
+    if (p.role === 'officer') { const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 4); html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">You may ride out between campaigns.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripMonths(p, s)} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`; }
+  }
+  view.innerHTML = html;
+}
+function leadToggle(r) {
+  return `<div class="chips" style="margin-top:8px"><button class="chip ${r.leadInPerson ? 'on' : ''}" data-act='${JSON.stringify({ type: 'lead', on: !r.leadInPerson })}'>${r.leadInPerson ? '✓ ' : ''}Lead my armies in person</button></div><div class="sub">${r.leadInPerson ? 'You ride to war with your hosts: big bonuses, real danger, and your steward rules while you are gone.' : 'Your officers lead your attacks while you stay at court.'}</div>`;
 }
 
 function renderGameOver(view, w) {
