@@ -1,4 +1,4 @@
-// The Dynasty — battle engine (prototype). No DOM here: pure simulation.
+// The Dynasty — battle engine. No DOM here: pure simulation.
 // Divisions of soldiers fight on a battle map. Orders travel by messenger, morale decides who breaks.
 
 export const FIELD = { w: 1600, h: 1000 };

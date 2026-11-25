@@ -1,4 +1,4 @@
-// The Dynasty — living world simulation (prototype).
+// The Dynasty — living world simulation.
 // Runs month by month. Everything that happens is written to the Chronicle.
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
 import { Battle, UNITS } from './battle.js';

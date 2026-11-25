@@ -53,7 +53,7 @@ export async function renderBattleSetup(view) {
   const offs = officersFor('you', setup.you);
   const facBtns = (key) => FACTIONS.map(f => `<button class="chip ${setup[key] === f ? 'on' : ''}" data-bset="${key}" data-val="${f}">${cultureById(f).name}</button>`).join('');
   view.innerHTML = `
-    <div class="card"><h3>⚔ Battle prototype</h3><div class="sub">Command three divisions on a battle map. Orders ride out by messenger, so they take time to arrive, and faster for officers with high Leadership. Morale decides who breaks. You get one stratagem: a volley of fire.</div></div>
+    <div class="card"><h3>⚔ Battle sandbox</h3><div class="sub">Command three divisions on a battle map. Orders ride out by messenger, so they take time to arrive, and faster for officers with high Leadership. Morale decides who breaks. You get one stratagem: a volley of fire.</div></div>
     <h2 class="sec">Your army</h2><div class="chips">${facBtns('you')}</div>
     ${picks.map((u, i) => divisionPicker(i, u, offs[i])).join('')}
     <h2 class="sec">The enemy</h2><div class="chips">${facBtns('foe')}</div>
@@ -61,7 +61,7 @@ export async function renderBattleSetup(view) {
     <h2 class="sec">Battlefield</h2><div class="chips">${TERRAINS.map(t => `<button class="chip ${setup.terrain === t ? 'on' : ''}" data-bset="terrain" data-val="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
     <div class="chips">${Object.keys(SIZES).map(s => `<button class="chip ${setup.size === s ? 'on' : ''}" data-bset="size" data-val="${s}">${s[0].toUpperCase() + s.slice(1)} (${Math.round(2200 * SIZES[s]).toLocaleString()} troops)</button>`).join('')}</div>
     <button class="btn" id="startBattle">Begin the battle</button>
-    <p class="note">Unit art: HAS Creature Pack by Aleksandr Makarov. Next: battles started from the living world, with real officers and armies.</p>`;
+    <p class="note">A practice battle outside your world. Unit art: HAS by Aleksandr Makarov.</p>`;
 }
 function divisionPicker(i, u, off) {
   const r = UNITS[setup.you].map(x => x.role);

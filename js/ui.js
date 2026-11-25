@@ -399,6 +399,8 @@ function worldSheet() {
     <div class="chips">${[['off', 'Never'], ['big', 'Big battles'], ['all', 'Every battle']].map(([k, l]) => `<button class="chip ${watchMode === k ? 'on' : ''}" data-watch="${k}">${l}</button>`).join('')}</div>
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 1,400 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
+    <h2 class="sec">Credits</h2>
+    <div class="sub">The Dynasty v1.0. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 

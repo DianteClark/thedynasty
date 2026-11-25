@@ -14,6 +14,8 @@ Each build is playable on its own and adds one layer. The order follows what eac
 | 0.8 ✅ | Dynasty depth | Title management, duels and tournaments you can watch, oaths, heirs with blended traits, history generated before turn one, end-of-run saga, "same world, new life" |
 | 0.9 ✅ | Content and polish | Dwarves, Wood Elves, Orcs and Lizardmen in battle, save slots, seed sharing, mod support, balance pass, polish backlog below |
 
+| 1.0 ✅ | Release | Full regression, credits, final docs |
+
 ## Polish backlog
 
 - ✅ Battle: more forgiving tap targets when selecting divisions

@@ -1,10 +1,34 @@
 # The Dynasty
 
-**▶ Play it live: https://dianteclark.github.io/thedynasty/**
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v1.0
 
-A living fantasy world sim. Kingdoms, lordships, free villages, vagabonds, bandits and mercenaries all play by the same rules, and the world writes its own history into the Chronicle.
+A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, somewhere in a world that has already lived through thirty years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
-On your phone, open the live link and choose **Add to Home Screen** to install it like an app.
+On your phone, open the link and choose **Add to Home Screen**. It runs full-screen and works offline.
+
+## How to play
+
+1. **Create your character** on the 🛡 You tab: origin, culture (ten of them), name, and ironman or casual.
+2. **Live:** press ▶ or skip ahead a year or ten. Time stops whenever something happens to you.
+3. **Act** from the You tab, or by tapping things on the 🗺 Map: travel, take contracts, raise armies, marry, scheme, fight.
+4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
+5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
+
+## What's in it
+
+- **A living world:** procedurally generated maps in three sizes, seasons, harvests and famine, a ladder of power from vagabond bands to kingdoms, overextension, uprisings with causes, succession crises, monsters that grow and break out, and ruins that get resettled.
+- **People:** officers with five stats, levels and up to three titles (rank, deed, reputation) that can counter each other; marriages, children who take after their parents, oaths, grudges, wards, rumors and reputations.
+- **War:** hosts march across the map; battles are fought on a real battle engine with HAS sprites for all ten cultures, morale and routs, flanking, messenger-delayed orders, stratagems, troop tiers you can recognise on sight, and generals who fight in character.
+- **Intrigue:** spies, assassins, agitators, envoys, caravans and rumors travel the map and can be caught or raided.
+- **Ruling:** your council (steward, spymaster, captain), granaries, levies, armies, diplomacy and peace terms.
+- **Honour:** duels and tournaments you can watch, challenges and stances, the unique title Strongest Under Heaven.
+- **Saves, seeds and mods:** instant-loading save slots, shareable seeds, and JSON mods.
+
+## Credits
+
+All art is from the **HAS (Heroic Fantasy)** pixel art packs by **Aleksandr Makarov** ([@IknowKingRabbit](https://twitter.com/IknowKingRabbit)), used under the pack's license, which allows commercial and modified use with attribution.
+
+## Development history
 
 ## Prototype 0.1: the world sim
 
