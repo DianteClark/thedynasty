@@ -74,19 +74,20 @@ function hud() {
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function measure(ms) { const samples = []; const end = performance.now() + ms; while (performance.now() < end) { await wait(250); samples.push(fps()); } return { fps: Math.round(samples.reduce((a, b) => a + b, 0) / samples.length), sim: simMs, draw: drawMs }; }
-async function auto() {
-  const rows = []; const res = $('#results'); $('#auto').disabled = true;
+async function auto(quick = false) {
+  const rows = []; const res = $('#results'); $('#auto').disabled = true; $('#quick').disabled = true;
+  const list = quick ? [2500, 5000, 10000, 15000, 20000] : PRESETS; const warm = quick ? 1500 : 4000, meas = quick ? 1500 : 2500;
   const render = () => { res.innerHTML = `<table><tr><th>Troops</th><th>Whole field FPS</th><th>Close-up FPS</th><th>Sim ms</th><th>Draw ms</th></tr>${rows.map(r => `<tr><td>${r.n.toLocaleString()}</td><td>${r.far}</td><td>${r.close}</td><td>${r.sim.toFixed(1)}</td><td>${r.draw.toFixed(1)}</td></tr>`).join('')}</table>`; };
-  for (const n of PRESETS) {
-    start(n); setCam('mid'); await wait(4000); // let the armies close and clash
-    setCam('far'); const far = await measure(2500);
-    setCam('close'); const close = await measure(2500);
+  for (const n of list) {
+    start(n); setCam('mid'); await wait(warm); // let the armies close and clash
+    setCam('far'); const far = await measure(meas);
+    setCam('close'); const close = await measure(meas);
     rows.push({ n, far: far.fps, close: close.fps, sim: (far.sim + close.sim) / 2, draw: far.draw }); render();
     if (far.fps < 50 && close.fps < 50) break;
   }
   const smooth = rows.filter(r => Math.min(r.far, r.close) >= 55).pop();
   res.innerHTML += `<p class="note">${smooth ? `Smooth (55+ FPS) up to <b>${smooth.n.toLocaleString()}</b> troops on this device, even zoomed all the way out.` : 'Below 55 FPS even at the smallest size on this device.'} Screenshot this table and send it over.</p>`;
-  $('#auto').disabled = false;
+  $('#auto').disabled = false; $('#quick').disabled = false;
 }
 
 (async () => {
@@ -101,10 +102,12 @@ async function auto() {
     if (t.dataset.cam) setCam(t.dataset.cam);
     if (t.id === 'pause') { paused = !paused; t.textContent = paused ? '▶' : '❚❚'; }
     if (t.id === 'auto') auto();
+    if (t.id === 'quick') auto(true);
   });
   // drag to pan
   let p = null; canvas.addEventListener('pointerdown', e => { p = { x: e.clientX, y: e.clientY }; follow = false; });
   canvas.addEventListener('pointermove', e => { if (!p) return; cam.x -= (e.clientX - p.x) / cam.z; cam.y -= (e.clientY - p.y) / cam.z; p = { x: e.clientX, y: e.clientY }; });
   canvas.addEventListener('pointerup', () => { p = null; });
   requestAnimationFrame(frame);
+  if (new URLSearchParams(location.search).has('quick')) auto(true);
 })();
