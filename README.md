@@ -1,4 +1,32 @@
-# The Dynasty
+# The Dynasty: Warlord
+
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v3.1
+
+You command an army and nothing else. Fight garrison-versus-garrison battles against CPU warlords on Dynasty Warriors-style road maps of up to 30,000 troops, win rewards, and build your army up between battles.
+
+On your phone, open the link and choose **Add to Home Screen**. It runs full-screen and works offline.
+
+The original world sim still lives at **[/classic](https://dianteclark.github.io/thedynasty/classic/)**.
+
+## How to play (3.1)
+
+1. Pick your culture, your enemy's culture and style, the army size (4,000 to 30,000) and the terrain, then **Fight**.
+2. Each side has 3 to 5 bases with dormant garrisons, joined by roads, passes, bridges and fords through woods, ridges and rivers. Take the enemy's main camp to win.
+3. Tap an officer card to order it: hold, advance, charge, take another road, fall back to camp, or 📍 go to a base you tap on the map.
+4. If time runs out, the side holding more bases wins, then the side with more troops standing.
+
+## Credits
+
+All art is from the **HAS (Heroic Fantasy)** pixel art packs by **Aleksandr Makarov** ([@IknowKingRabbit](https://twitter.com/IknowKingRabbit)), used under the pack's license, which allows commercial and modified use with attribution.
+
+## Development history
+
+## 3.1: road battle maps
+
+The game becomes Warlord: you manage only your army. Battles are fought on generated road networks (lanes, crossroads, passes, bridges and fords; woods, rock ridges and rivers are impassable), with bases placed along the lanes and divisions that route along the roads. The old dynasty sim moved to /classic.
+
+## The classic game (up to 2.12)
+
 
 **▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.12
 
@@ -6,7 +34,7 @@ A living fantasy world sim with no fixed ending. Start as a vagabond, a village 
 
 On your phone, open the link and choose **Add to Home Screen**. It runs full-screen and works offline.
 
-## How to play
+### How to play
 
 1. **Create your character** on the 🛡 Household tab: origin, culture (ten of them), name, and ironman or casual.
 2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every minute. You can pause (❚❚), but you can't hurry time: you only control yourself.
@@ -14,7 +42,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
 5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
 
-## What's in it
+### What's in it
 
 - **A living world:** procedurally generated worlds in three sizes with continents, islands and named wilds, ports and sailing, earthquakes, wildfires and floods that reshape the land, seasons, harvests and famine, a ladder of power from vagabond bands to kingdoms, overextension, uprisings with causes, succession crises, monsters that grow and break out, and ruins that get resettled.
 - **People:** officers with five stats, levels and up to three titles (rank, deed, reputation) that can counter each other; marriages, children who take after their parents, oaths, grudges, wards, rumors and reputations.
@@ -24,11 +52,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 - **Honour:** duels and tournaments you can watch, challenges and stances, the unique title Strongest Under Heaven.
 - **Saves, seeds and mods:** instant-loading save slots, shareable seeds, and JSON mods.
 
-## Credits
 
-All art is from the **HAS (Heroic Fantasy)** pixel art packs by **Aleksandr Makarov** ([@IknowKingRabbit](https://twitter.com/IknowKingRabbit)), used under the pack's license, which allows commercial and modified use with attribution.
-
-## Development history
 
 ## Prototype 0.1: the world sim
 

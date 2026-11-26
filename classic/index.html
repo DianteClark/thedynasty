@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <base href="../">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Dynasty (classic)</title>
+  <meta name="description" content="A living world sim: kingdoms, villages, vagabonds and dynasties that write their own history.">
+  <meta name="theme-color" content="#16120d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="The Dynasty">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="classic/css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>The Dynasty</h1>
+      <div class="hbtns"><button class="icon-btn dbadge" id="btnDecide" aria-label="Decisions waiting" hidden>📜 <b id="dcount">0</b></button><button class="icon-btn" id="btnWorld" aria-label="Settings and saves">⚙</button></div>
+    </div>
+    <div class="clock">
+      <button id="btnPlay" class="ctl primary" aria-label="Pause">❚❚</button>
+      <div class="when"><div class="date"><span id="date">—</span><span class="season" id="season"></span></div><div class="mbar"><div id="monthBar"></div></div></div>
+    </div>
+    <div class="progress-wrap" id="progress" hidden><div class="progress"><div id="progressBar"></div></div><div class="plabel" id="progressLabel"></div></div>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="map"><span>🗺</span>Map</button>
+    <button data-tab="court"><span>🏰</span><i id="courtLabel">Court</i></button>
+    <button data-tab="you" class="on"><span>🛡</span>Household</button>
+    <button data-tab="chronicle"><span>📜</span>Chronicle</button>
+    <button data-tab="world"><span>👑</span>World</button>
+  </nav>
+
+  <div class="sheet-wrap" id="sheetWrap" hidden>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <script type="module" src="classic/js/ui.js"></script>
+</body>
+</html>

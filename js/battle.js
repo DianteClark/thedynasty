@@ -4,6 +4,7 @@
 export const FIELD = { w: 1600, h: 1000 };
 
 import { UNITS } from '../assets/units/units.js';
+import { clampToPath, routeNodes, nearestNode, walkable, buildRaster } from './bmap.js';
 export { UNITS };
 
 const ROLE = {
@@ -43,7 +44,9 @@ export class Battle {
    *        divisions: [ { faction?, unit: index, count, level, officer: {name, stats:{lea,mig,int,cha}, ref} } ] } x2 ] }
    */
   constructor(cfg) {
-    this.fw = (cfg.field && cfg.field.w) || FIELD.w; this.fh = (cfg.field && cfg.field.h) || FIELD.h;
+    this.map = cfg.map || null; // Warlord battle maps: roads, passes and bridges between the bases
+    this.fw = this.map ? this.map.w : (cfg.field && cfg.field.w) || FIELD.w; this.fh = this.map ? this.map.h : (cfg.field && cfg.field.h) || FIELD.h;
+    this.limit = this.map ? Math.round(300 + this.fw / 8) : 420; this.symmetric = !!cfg.symmetric;
     this.rand = mulberry(cfg.seed || 1);
     this.terrain = cfg.terrain || 'plains';
     this.t = 0; this.steps = 0; this.over = false; this.winner = null; this.events = [];
@@ -65,6 +68,10 @@ export class Battle {
       this.bases.push({ id: this.bases.length, side: bs.side, home: bs.side, kind: bs.kind, faction: bs.faction || side.faction, name: bs.name || (bs.kind === 'main' ? 'the main camp' : bs.kind), x, y, r: Math.max(70, Math.sqrt(bs.count) * 5 + 34), start: bs.count, div: null, fired: 0 });
       side.divisions.push({ faction: bs.faction || side.faction, unit: bs.unit || 0, count: Math.max(1, bs.count), level: bs.level || 2, garrison: { x, y, base: this.bases.length - 1 }, officer: { name: bs.kind === 'main' ? 'Camp guard' : 'Garrison', stats: { lea: 8, mig: 6, int: 6, cha: 9 } } });
     }
+    if (this.map) { // clear enough ground around each base for its garrison, then redraw the paths
+      let grew = false; for (const b of this.bases) { const n = this.map.nodes[nearestNode(this.map, b.x, b.y)]; const need = Math.sqrt(b.start) * 7.5 + 40 + (n.kind === 'camp' ? 120 : 0); if ((n.discR || 0) < need) { n.discR = need; grew = true; } }
+      if (grew) buildRaster(this.map);
+    }
     for (const side of this.sides) if (side.reserve && side.reserve.count > 0) {
       const main = this.bases.find(b => b.side === side.index && b.kind === 'main');
       side.divisions.push({ faction: side.reserve.faction || side.faction, unit: side.reserve.unit || 0, count: side.reserve.count, level: side.reserve.level || 2, reserve: true, at: main ? { x: main.x + side.dir * (main.r + 60), y: main.y } : null, officer: { name: "The lord's reserve", stats: { lea: 9, mig: 6, int: 6, cha: 9 } } });
@@ -74,6 +81,7 @@ export class Battle {
       side.divisions.forEach(d => this.makeDivision(side, d, field.indexOf(d), field.length, cfg));
     }
     for (const b of this.bases) b.div = this.divisions.find(d => d.garrison && d.garrison.baseIdx === b.id) || null;
+    if (this.map) for (const s of this.soldiers) clampToPath(this.map, s);
     this.log(`The battle begins on the ${this.terrain}.`, null);
   }
 
@@ -90,19 +98,25 @@ export class Battle {
     const back = role === 'ranged' || role === 'magic' ? 60 : 0;
     const gar = d.garrison || null;
     const x0 = cfg.startGap ? (side.index === 0 ? this.fw / 2 - cfg.startGap / 2 - back : this.fw / 2 + cfg.startGap / 2 + back) : side.index === 0 ? 260 + this.inset - back : this.fw - 260 - this.inset + back;
-    const x = gar ? gar.x : d.at ? d.at.x : x0, y = gar ? gar.y : d.at ? d.at.y : y0;
+    let x = gar ? gar.x : d.at ? d.at.x : x0, y = gar ? gar.y : d.at ? d.at.y : y0;
+    if (this.map && !gar && !d.at) { // officers line up on the roads behind their front posts
+      const M = this.map, l = k % M.lanes, col = side.index === 0 ? 1 : 5, nd = M.nodes[M.grid[l][col]], back = M.nodes[M.grid[l][side.index === 0 ? 0 : 6]];
+      const step = Math.floor(k / M.lanes) * 150; const dx = back.x - nd.x, dy = back.y - nd.y, L = Math.hypot(dx, dy) || 1;
+      x = nd.x + dx / L * Math.min(step, L); y = nd.y + dy / L * Math.min(step, L);
+    }
     const unled = !!(gar || d.reserve);
     const div = {
       id: this.divisions.length, side: side.index, faction, unit: d.unit, unitName: def.name, role, R,
       stats: { hp: R.hp * mult * 2.6, atk: R.atk * mult * 0.5 * (mods.atk || 1), def: R.def * mult * 0.5, shot: (R.shot || 0) * mult * 0.6 * (mods.atk || 1), spd: R.spd * (this.season === 'Winter' ? 0.85 : 1), range: R.range, cd: R.cd },
       level: d.level || 1, officer: { ...d.officer, x: x - 34 * side.dir, y, hp: 90 + d.officer.stats.mig * 8, alive: !unled, captured: false },
       garrison: gar ? { x, y, leash: gar.leash || 380, quiet: 0, baseIdx: gar.base } : null, dormant: !!gar, base: gar ? (typeof gar.base === 'number' ? (this.bases && this.bases[gar.base] ? this.bases[gar.base].name : 'a base') : gar.base) : null,
-      reserve: !!d.reserve, follow: null,
+      reserve: !!d.reserve, follow: null, dir: { x: side.dir, y: 0 }, at: this.map ? nearestNode(this.map, x, y) : null, route: null, routeT: -9, avoid: null,
       cx: x, cy: y, tx: x, ty: y, facing: side.dir, state: d.reserve ? 'defend' : 'hold', pending: null, morale: 0, baseMorale: 52 + d.officer.stats.cha * 1.4 + d.officer.stats.lea * 0.6 + (d.level || 1) * 1.5 + (mods.morale || 0),
       start: d.count, dead: 0, fled: 0, routed: false, rallied: 0, flankPhase: 0, chargeT: 0, lastHit: -9, inCombat: false, contactT: 0, color: side.color,
     };
     div.morale = div.baseMorale;
-    const cols = gar ? Math.max(6, Math.round(Math.sqrt(d.count))) : Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
+    let cols = gar ? Math.max(6, Math.round(Math.sqrt(d.count))) : Math.max(6, Math.round(Math.sqrt(d.count * (role === 'cav' ? 1.2 : 2.2))));
+    if (this.map && !gar) cols = Math.min(cols, 15); // a column that fits the road
     div.cols = cols; div.spacing = gar ? 10 : role === 'cav' || role === 'heavy' ? 15 : 12;
     div.soldiers = [];
     for (let i = 0; i < d.count; i++) {
@@ -113,6 +127,51 @@ export class Battle {
     this.divisions.push(div);
     return div;
   }
+  // ---------- roads: where a division heads on a Warlord map ----------
+  reachableNode(p) {
+    // the nearest node you can walk to in a straight line (so cliffs don't fool us)
+    const M = this.map; const order = M.nodes.map(n => [n.id, (n.x - p.x) ** 2 + (n.y - p.y) ** 2]).sort((a, b) => a[1] - b[1]);
+    for (const [id] of order.slice(0, 6)) { const n = M.nodes[id]; let ok = true; const L = Math.hypot(n.x - p.x, n.y - p.y); for (let t = 24; t < L; t += 24) if (!walkable(M, p.x + (n.x - p.x) * t / L, p.y + (n.y - p.y) * t / L)) { ok = false; break; } if (ok) return id; }
+    return order[0][0];
+  }
+  baseNode(b) { return nearestNode(this.map, b.x, b.y); }
+  // the next point on the road toward a node; routes are refreshed every couple of seconds (and when the map changes)
+  toward(div, c, goalNode) {
+    const M = this.map;
+    if (!div.route || div.routeGoal !== goalNode || this.t - div.routeT > 2 || div.routeRev !== M.rev) {
+      div.at = this.reachableNode(c); div.route = routeNodes(M, div.at, goalNode, div.avoid) || []; div.routeGoal = goalNode; div.routeT = this.t; div.routeRev = M.rev;
+    }
+    while (div.route.length && Math.hypot(M.nodes[div.route[0]].x - div.cx, M.nodes[div.route[0]].y - div.cy) < 40) div.at = div.route.shift();
+    const n = div.route.length ? M.nodes[div.route[0]] : M.nodes[goalNode];
+    return { x: n.x, y: n.y };
+  }
+  mapGoal(div, c, target, td, ranged) {
+    const ownB = this.bases.filter(b => b.side === div.side), foeB = this.bases.filter(b => b.side !== div.side);
+    const graphNear = list => { let best = null, bd = Infinity; const from = this.reachableNode(c); for (const b of list) { const r = routeNodes(this.map, from, this.baseNode(b)); const L = r ? r.length : Infinity; if (L < bd) { bd = L; best = b; } } return best; };
+    const close = target && td < (div.state === 'hold' ? 160 : 260);
+    let goal = null, speedMul = 1;
+    const st = div.state.startsWith('goto:') ? 'goto' : div.state;
+    switch (st) {
+      case 'hold': break;
+      case 'advance': case 'charge': case 'push': case 'flankL': case 'flankR': {
+        if (close) { goal = ranged && td < div.stats.range * 0.85 ? null : target.c; if (st === 'charge') speedMul = div.role === 'cav' ? 1.35 : 1.15; break; }
+        if (!div.objective || div.objective.side === div.side || this.t - (div.objT || -9) > 6) { div.objective = graphNear(foeB); div.objT = this.t; }
+        if (div.objective) goal = this.toward(div, c, this.baseNode(div.objective));
+        if (st === 'charge') speedMul = div.role === 'cav' ? 1.35 : 1.15;
+        break;
+      }
+      case 'goto': { const n = +div.state.slice(5); if (close && td < 160) goal = target.c; else goal = this.toward(div, c, n); break; }
+      case 'retreat': goal = this.toward(div, c, this.map.camps[div.side]); break;
+      case 'follow': { const f = this.divisions[div.follow]; if (f && !f.routed && this.aliveCount(f) > 0) { const fc = f.c || this.centroid(f); goal = close && td < 180 ? target.c : Math.hypot(fc.x - c.x, fc.y - c.y) > 200 ? this.toward(div, c, this.reachableNode(fc)) : { x: fc.x, y: fc.y }; } else div.state = 'defend'; break; }
+      case 'defend': default: {
+        let worst = null, wd = 1e9; for (const b of ownB) for (const e of this.enemiesOf(div.side)) { const ec = e.c || this.centroid(e); const d = Math.hypot(ec.x - b.x, ec.y - b.y); if (d < wd) { wd = d; worst = b; } }
+        const home = worst && wd < 900 ? worst : ownB.find(b => b.kind === 'main') || ownB[0];
+        if (close && td < 220) goal = target.c; else if (home) goal = Math.hypot(home.x - c.x, home.y - c.y) < 120 ? null : this.toward(div, c, this.baseNode(home));
+      }
+    }
+    return { goal, speedMul };
+  }
+
   // ---------- bases ----------
   basesTick() {
     if ((this.steps % 15) !== 0) return;
@@ -160,9 +219,10 @@ export class Battle {
     const cols = div.cols, rows = Math.ceil(div.soldiers ? div.start / cols : 1);
     const c = i % cols, r = Math.floor(i / cols);
     // rows run front to back along the facing direction; columns run up and down
-    const along = -(r - (Math.ceil(div.start / cols) - 1) / 2) * div.spacing * div.facing;
+    const along = -(r - (Math.ceil(div.start / cols) - 1) / 2) * div.spacing;
     const across = (c - (cols - 1) / 2) * div.spacing;
-    return { x: div.cx + along, y: div.cy + across };
+    const d = div.dir || { x: div.facing, y: 0 };
+    return { x: div.cx + d.x * along - d.y * across, y: div.cy + d.y * along + d.x * across };
   }
   enemiesOf(side) { return this.divisions.filter(d => d.side !== side && !d.routed && this.aliveCount(d) > 0); }
 
@@ -182,6 +242,10 @@ export class Battle {
     if (order.startsWith('follow:')) { div.follow = +order.slice(7); order = 'follow'; }
     div.state = order; div.flankPhase = 0; div.pending = null;
     if (order === 'charge') div.chargeT = this.t;
+    if (this.map && (order === 'flankL' || order === 'flankR')) { // on a road map, a flank means taking another road
+      div.avoid = new Set(); const r = div.route || []; let prev = div.at; for (const id of r) { const e = this.map.edges.find(x => (x.a === prev && x.b === id) || (x.b === prev && x.a === id)); if (e) div.avoid.add(e.id); prev = id; } div.route = null; return;
+    }
+    if (order !== 'flankL' && order !== 'flankR') div.avoid = null;
     if (order === 'flankL' || order === 'flankR') { const sign = order === 'flankL' ? -1 : 1; const c = this.centroid(div); div.flankPt = { x: c.x + div.facing * 160, y: Math.max(60, Math.min(this.fh - 60, c.y + sign * 300 * (div.side === 0 ? 1 : -1))) }; }
   }
   takeover(sideIdx, style = 'balanced') { if (this.sides[sideIdx].ai) return; this.recorded.push({ step: this.steps, type: 'ai', side: sideIdx, style }); this.sides[sideIdx].ai = style; }
@@ -259,7 +323,7 @@ export class Battle {
     // officer follows behind the formation
     const o = div.officer;
     if (o.alive && !o.captured) {
-      const ox = c.x - 30 * div.facing, oy = c.y; const d = Math.hypot(ox - o.x, oy - o.y);
+      const dd = div.dir || { x: div.facing, y: 0 }; const ox = c.x - 30 * dd.x, oy = c.y - 30 * dd.y; const d = Math.hypot(ox - o.x, oy - o.y);
       if (d > 1) { const sp = Math.min(d, (div.routed ? 50 : 40) * dt); o.x += (ox - o.x) / d * sp; o.y += (oy - o.y) / d * sp; }
     }
     // morale
@@ -299,7 +363,8 @@ export class Battle {
       if (target && Math.hypot(target.c.x - G.x, target.c.y - G.y) < G.leash) goal = target.c; else goal = G;
     }
     const ranged = div.role === 'ranged' || div.role === 'magic';
-    if (!div.garrison && !div.reserve) switch (div.state) {
+    if (this.map && !div.garrison) { const g = this.mapGoal(div, c, target, td, ranged); goal = g.goal; speedMul = g.speedMul; }
+    else if (!div.garrison && !div.reserve) switch (div.state) {
       case 'hold': goal = null; break;
       case 'advance': if (target) goal = ranged && td < div.stats.range * 0.85 ? null : target.c; break;
       case 'charge': if (target) { goal = target.c; speedMul = div.role === 'cav' ? 1.35 : 1.15; } break;
@@ -312,8 +377,12 @@ export class Battle {
     if (goal) {
       const dx = goal.x - div.cx, dy = goal.y - div.cy, d = Math.hypot(dx, dy);
       const sp = div.stats.spd * speedMul * dt * 0.95;
-      if (d > 4) { div.cx += dx / d * Math.min(d, sp); div.cy += dy / d * Math.min(d, sp); }
+      if (d > 4) {
+        div.cx += dx / d * Math.min(d, sp); div.cy += dy / d * Math.min(d, sp);
+        if (this.map) { const k = 0.08; const nx = div.dir.x + (dx / d - div.dir.x) * k, ny = div.dir.y + (dy / d - div.dir.y) * k, L = Math.hypot(nx, ny) || 1; div.dir = { x: nx / L, y: ny / L }; div.facing = div.dir.x >= 0 ? 1 : -1; }
+      }
     }
+    if (this.map) { const a = { x: div.cx, y: div.cy }; if (clampToPath(this.map, a)) { div.cx = a.x; div.cy = a.y; } }
     // keep the anchor close to the actual troops so formations don't stretch
     const lag = Math.hypot(div.cx - c.x, div.cy - c.y);
     if (lag > 70) { div.cx = c.x + (div.cx - c.x) * 70 / lag; div.cy = c.y + (div.cy - c.y) * 70 / lag; }
@@ -354,6 +423,14 @@ export class Battle {
     s.cd -= dt; s.at += dt * 6;
     if (s.hitT > 0) s.hitT -= dt;
     if (div.routed) {
+      if (this.map) { // run for home along the roads
+        if (!div.fleeRoute || this.t - (div.fleeT || -9) > 3) { div.fleeT = this.t; const home = this.map.camps[div.side]; div.fleeRoute = routeNodes(this.map, this.reachableNode(div.c || this.centroid(div)), home) || [home]; }
+        const wp = this.map.nodes[div.fleeRoute.find(id => Math.hypot(this.map.nodes[id].x - s.x, this.map.nodes[id].y - s.y) > 30) ?? this.map.camps[div.side]];
+        const dx = wp.x - s.x, dy = wp.y - s.y, d = Math.hypot(dx, dy) || 1; s.x += dx / d * st.spd * 1.25 * dt; s.y += dy / d * st.spd * 1.25 * dt + (this.r() - 0.5) * 10 * dt; s.anim = 1; s.flip = dx < 0;
+        clampToPath(this.map, s);
+        const camp = this.map.nodes[this.map.camps[div.side]]; if (Math.hypot(camp.x - s.x, camp.y - s.y) < 90) { s.fled = true; div.fled++; }
+        return;
+      }
       const ex = div.side === 0 ? -30 : this.fw + 30;
       const dx = ex - s.x; s.x += Math.sign(dx) * st.spd * 1.25 * dt; s.y += (this.r() - 0.5) * 20 * dt; s.anim = 1; s.flip = dx < 0;
       if (s.x < -10 || s.x > this.fw + 10) { s.fled = true; div.fled++; }
@@ -395,6 +472,7 @@ export class Battle {
       if (list) for (let i = 0; i < Math.min(list.length, 8); i++) { const o = list[(i * 7 + s.slot) % list.length]; if (o === s) continue; const dx = s.x - o.x, dy = s.y - o.y, d2 = dx * dx + dy * dy; if (d2 < 49 && d2 > 0.01) { const d = Math.sqrt(d2); s.x += dx / d * (7 - d) * 0.5; s.y += dy / d * (7 - d) * 0.5; } }
     }
     s.x = Math.max(4, Math.min(this.fw - 4, s.x)); s.y = Math.max(8, Math.min(this.fh - 4, s.y));
+    if (this.map) clampToPath(this.map, s);
     if (s.atkT > 0) s.atkT -= dt; else s.anim = moving ? 1 : 0;
     if (s.hitT > 0 && s.anim !== 2) s.anim = 3;
     // officer in danger
@@ -515,7 +593,7 @@ export class Battle {
       const standing = this.divisions.filter(d => d.side === side.index && !d.routed && this.aliveCount(d) > 0);
       if (!standing.length) { this.over = true; this.winner = 1 - side.index; this.log(`${this.sides[1 - side.index].name} holds the field. Victory!`, 1 - side.index, 'end'); return; }
     }
-    if (this.t > 420) {
+    if (this.t > this.limit) {
       const str = i => this.divisions.filter(d => d.side === i && !d.routed).reduce((a, d) => a + this.aliveCount(d) * d.stats.hp, 0);
       this.over = true; this.winner = str(0) >= str(1) ? 0 : 1; this.log('Night falls and both armies withdraw. The stronger side claims the day.', this.winner, 'end');
     }
@@ -527,10 +605,15 @@ export class Battle {
     const anyUp = i => this.divisions.some(d => d.side === i && !d.routed && this.aliveCount(d) > 0);
     if (!anyUp(0)) { this.over = true; this.winner = 1; this.log(`The attack is broken. ${this.sides[1].name} holds the field.`, 1, 'end'); return; }
     if (!anyUp(1)) { this.over = true; this.winner = 0; this.log(`${this.sides[0].name} holds the field. Victory!`, 0, 'end'); return; }
-    if (!fieldUp(0) && this.t > 20) { this.over = true; this.winner = 1; this.log(`The attackers' officers are all broken. ${this.sides[1].name} holds.`, 1, 'end'); return; }
-    if (this.t > 420) {
+    if (!this.symmetric && !fieldUp(0) && this.t > 20) { this.over = true; this.winner = 1; this.log(`The attackers' officers are all broken. ${this.sides[1].name} holds.`, 1, 'end'); return; }
+    if (this.t > this.limit) {
       this.over = true;
       const att = this.basesHeld(0), def = this.basesHeld(1);
+      if (this.symmetric) { // two warlords, no defender: whoever holds more of the field when night falls
+        const str = i => this.divisions.filter(d => d.side === i && !d.routed).reduce((a, d) => a + this.aliveCount(d), 0);
+        this.winner = att !== def ? (att > def ? 0 : 1) : str(0) >= str(1) ? 0 : 1;
+        this.log(`Night falls. ${this.sides[this.winner].name} holds more of the field and claims the day.`, this.winner, 'end'); return;
+      }
       this.winner = !fieldUp(1) && att > def ? 0 : 1;
       this.log(this.winner === 1 ? `Night falls. The main camp of ${this.sides[1].name} still stands, and the attack fails.` : `Night falls with ${this.sides[1].name}'s army broken and most of its posts taken. ${this.sides[0].name} claims the day.`, this.winner, 'end');
     }

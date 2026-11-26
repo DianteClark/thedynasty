@@ -1,6 +1,7 @@
 // Battle screen: setup, live battlefield (pan, pinch-zoom, minimap), orders, stratagem, results.
 import { Battle, FIELD, ORDERS, UNITS, RESERVE_ORDERS, layoutBases, fieldFor, BASE_CAPS } from './battle.js';
-import { BUILDINGS } from '../assets/world/world.js';
+import { BUILDINGS, BIOMES } from '../assets/world/world.js';
+import { walkable, nearestNode } from './bmap.js';
 import { CULTURES, cultureById } from './names.js';
 
 const FACTIONS = Object.keys(UNITS);
@@ -9,7 +10,11 @@ const TERRAINS = ['plains', 'forest', 'swamp', 'wasteland', 'tundra', 'mountain'
 const ROLE_LABEL = { inf: 'Infantry', heavy: 'Heavy', ranged: 'Ranged', magic: 'Casters', cav: 'Cavalry', flyer: 'Fliers' };
 const SIZES = { skirmish: 0.45, battle: 1, war: 1.6 };
 const GLYPH = { hold: '■', advance: '➜', charge: '⚔', flankL: '↰', flankR: '↱', retreat: '↩', defend: '◈', push: '»', follow: '⇢' };
-const MID = 0.9; // the camera never zooms out past Mid: you follow your officers, not the whole field
+const MID = 0.9;
+const MAP_ORDERS = { hold: 'Hold position', advance: 'Advance', charge: 'Charge', flankL: 'Take another road', retreat: 'Fall back to camp' };
+let goingTo = false;
+const orderLabel = o => !o ? '' : o.startsWith('goto:') ? 'Marching to a base' : o.startsWith('follow') ? RESERVE_ORDERS.follow : (B && B.map ? MAP_ORDERS[o] : null) || ORDERS[o] || RESERVE_ORDERS[o] || o;
+const glyphOf = o => !o ? '•' : o.startsWith('goto:') ? '📍' : GLYPH[o] || '•'; // the camera never zooms out past Mid: you follow your officers, not the whole field
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 let unitNames = null, images = {}, assetsReady = null;
@@ -22,6 +27,7 @@ function loadAssets() {
     await Promise.all(FACTIONS.map(async f => { const im = await loadImg(`assets/units/${f}.png`); images[f] = { r: im, l: flipped(im) }; }));
     images.ammo = await loadImg('assets/ammo.png');
     images.buildings = await loadImg('assets/world/buildings.png');
+    images.terrain = await loadImg('assets/world/terrain.png');
     await Promise.all(TERRAINS.map(async t => { images['g_' + t] = await loadImg(`assets/ground/${t}.png`); }));
   })();
   return assetsReady;
@@ -84,7 +90,7 @@ export function handleBattleSetupClick(t, view) {
 }
 
 // ---------- live battle ----------
-let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, spectator = null, acc = 0, mySide = 0, command = null, canvas, g, mini, mg, groundCanvas, corpseCanvas, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
+let B = null, cam = null, raf = 0, speed = 1, paused = false, root = null, spectator = null, acc = 0, mySide = 0, command = null, canvas, g, mini, mg, sel = null, targeting = false, seenEvents = 0, lastT = 0, toasts = [];
 
 function startBattle() {
   const scale = SIZES[setup.size];
@@ -149,29 +155,61 @@ function buildScreen() {
   const fit = () => { const dpr = Math.min(2, window.devicePixelRatio || 1); canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px'; cam.dpr = dpr; };
   cam = spectator ? { x: B.fw / 2, y: B.fh / 2, z: MID, dpr: 1, follow: true } : { x: mySide === 0 ? 300 : B.fw - 300, y: B.fh / 2, z: 1.5, dpr: 1 };
   fit(); window.addEventListener('resize', fit); root._fit = fit;
-  if (!spectator) { const own = B.divisions.filter(d => d.side === mySide && !d.garrison && !d.reserve); if (own.length) { cam.x = own.reduce((a, d) => a + d.cx, 0) / own.length + (mySide === 0 ? 120 : -120); cam.y = own.reduce((a, d) => a + d.cy, 0) / own.length; } }
+  if (!spectator) { const own = B.divisions.filter(d => d.side === mySide && !d.garrison && !d.reserve); if (own.length) { const first = B.map ? own[0] : null; cam.x = first ? first.cx : own.reduce((a, d) => a + d.cx, 0) / own.length + (mySide === 0 ? 120 : -120); cam.y = first ? first.cy : own.reduce((a, d) => a + d.cy, 0) / own.length; } }
   bindInput();
   seenEvents = 0; sel = null; targeting = false; speed = 1; paused = false; lastT = performance.now(); acc = 0; if (!spectator) toasts = [];
   renderDivCards();
   raf = requestAnimationFrame(frame);
 }
 
-function buildGround() {
-  groundCanvas = document.createElement('canvas'); groundCanvas.width = B.fw; groundCanvas.height = B.fh;
-  const gg = groundCanvas.getContext('2d'); const tiles = images['g_' + B.terrain];
-  let seed = 12345; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  for (let y = 0; y < B.fh; y += 16) for (let x = 0; x < B.fw; x += 16) { const k = r() < 0.75 ? 0 : r() < 0.5 ? 1 : 2; gg.drawImage(tiles, k * 16, 0, 16, 16, x, y, 16, 16); }
-  for (let i = 0; i < 260; i++) { const k = Math.floor(r() * 5); gg.drawImage(tiles, 48 + k * 16, 0, 16, 16, Math.floor(r() * B.fw), Math.floor(r() * B.fh), 16, 16); }
-  for (let i = 0; i < 120; i++) { const k = Math.floor(r() * 6); gg.drawImage(tiles, k * 16, 16, 16, 16, Math.floor(r() * B.fw), Math.floor(r() * B.fh), 16, 16); }
-  corpseCanvas = document.createElement('canvas'); corpseCanvas.width = B.fw; corpseCanvas.height = B.fh;
+// the field is drawn in 512px chunks, only where the camera looks (big maps would not fit one canvas)
+const CK = 512; let gChunks = new Map(), cChunks = new Map();
+function hsh(x, y, k = 0) { let h = (x * 374761393 + y * 668265263 + k * 1442695041) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function buildGround() { gChunks = new Map(); cChunks = new Map(); }
+function groundChunk(cx, cy) {
+  const key = cx + ',' + cy; let c = gChunks.get(key); if (c) return c;
+  c = document.createElement('canvas'); c.width = CK; c.height = CK; const gg = c.getContext('2d'); gg.imageSmoothingEnabled = false;
+  const tiles = images['g_' + B.terrain]; const x0 = cx * CK, y0 = cy * CK; gg.translate(-x0, -y0);
+  for (let y = y0; y < y0 + CK; y += 16) for (let x = x0; x < x0 + CK; x += 16) { const k = hsh(x, y) < 0.75 ? 0 : hsh(x, y, 1) < 0.5 ? 1 : 2; gg.drawImage(tiles, k * 16, 0, 16, 16, x, y, 16, 16); }
+  for (let y = y0; y < y0 + CK; y += 16) for (let x = x0; x < x0 + CK; x += 16) if (hsh(x, y, 2) < 0.05) gg.drawImage(tiles, 48 + Math.floor(hsh(x, y, 3) * 5) * 16, 0, 16, 16, x, y, 16, 16);
+  const M = B.map;
+  if (M) {
+    const bi = Math.max(0, BIOMES.indexOf(B.terrain)); const riverX = M.w / 2;
+    const isWater = (x, y) => M.river && Math.abs(x - riverX) < 95 + Math.sin(y / 140) * 25;
+    // roads: packed earth over the grass; bridges over the river
+    for (let y = y0; y < y0 + CK; y += 16) for (let x = x0; x < x0 + CK; x += 16) {
+      const w = walkable(M, x + 8, y + 8);
+      if (isWater(x + 8, y + 8)) { gg.drawImage(images.terrain, 288, 0, 16, 16, x, y, 16, 16); if (w) { gg.fillStyle = '#7a5a34'; gg.fillRect(x, y + 2, 16, 12); gg.fillStyle = '#5b4026'; gg.fillRect(x, y + 6, 16, 1); gg.fillRect(x, y + 11, 16, 1); } continue; }
+      if (w) {
+        gg.fillStyle = `rgba(150,112,66,${0.5 + hsh(x, y, 4) * 0.12})`; gg.fillRect(x, y, 16, 16);
+        if (hsh(x, y, 5) < 0.15) { gg.fillStyle = 'rgba(90,66,40,.35)'; gg.fillRect(x + hsh(x, y, 6) * 12, y + hsh(x, y, 7) * 12, 3, 2); } // pebbles and ruts
+        gg.fillStyle = 'rgba(70,52,30,.45)'; // the road's edge where it meets the wild
+        if (!walkable(M, x + 24, y + 8)) gg.fillRect(x + 14, y, 2, 16); if (!walkable(M, x - 8, y + 8)) gg.fillRect(x, y, 2, 16);
+        if (!walkable(M, x + 8, y + 24)) gg.fillRect(x, y + 14, 16, 2); if (!walkable(M, x + 8, y - 8)) gg.fillRect(x, y, 16, 2);
+      }
+    }
+    // everything off the roads: woods and rock, drawn top to bottom
+    const objs = [];
+    for (let y = y0 - 32; y < y0 + CK + 32; y += 16) for (let x = x0 - 32; x < x0 + CK + 32; x += 16) {
+      if (walkable(M, x + 8, y + 8) || isWater(x + 8, y + 8) || x < 0 || y < 0 || x >= M.w || y >= M.h) continue;
+      const rocky = B.terrain === 'mountain' || B.terrain === 'wasteland' || (B.terrain !== 'forest' && hsh(x >> 7, y >> 7, 6) < 0.35);
+      if (rocky && hsh(x, y, 7) < 0.55) objs.push({ y: y + 14, f: () => gg.drawImage(images.terrain, 5 * 32, 40, 32, 32, x - 8 + hsh(x, y, 8) * 4, y - 14, 32, 32) });
+      else for (let k = 0; k < 2; k++) if (hsh(x, y, 9 + k) < 0.8) { const ox = hsh(x, y, 11 + k) * 10 - 5, oy = hsh(x, y, 13 + k) * 8 - 4, v = hsh(x, y, 15 + k) < 0.5 ? 0 : 1; const tb = rocky ? 5 : bi === 0 ? 1 : bi; objs.push({ y: y + oy + 12, f: () => gg.drawImage(images.terrain, tb * 48 + v * 24, 16, 24, 24, x - 4 + ox, y - 10 + oy, 24, 24) }); }
+    }
+    objs.sort((a, b) => a.y - b.y).forEach(o => o.f());
+  } else {
+    for (let i = 0; i < 40; i++) { const k = Math.floor(hsh(cx, cy, 20 + i) * 6); gg.drawImage(tiles, k * 16, 16, 16, 16, x0 + hsh(cx, cy, 60 + i) * CK, y0 + hsh(cx, cy, 90 + i) * CK, 16, 16); }
+  }
+  gChunks.set(key, c); return c;
 }
+function corpseChunk(cx, cy) { const key = cx + ',' + cy; let c = cChunks.get(key); if (!c) { c = document.createElement('canvas'); c.width = CK; c.height = CK; cChunks.set(key, c); } return c; }
 
 function frame(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   // a heavy clash slows the battle a touch instead of stuttering: never more than a few steps a frame, and no catching up
   if (!paused && !B.over) { acc += dt * speed; let n = 0; const cap = Math.max(2, Math.ceil(speed)); while (acc >= 1 / 30 && n++ < cap) { B.step(1 / 30); acc -= 1 / 30; } if (acc > 1 / 30) acc = 0; }
   // bake finished deaths into the corpse layer
-  if (B.corpses.length) { const cg = corpseCanvas.getContext('2d'); cg.globalAlpha = 0.85; for (const s of B.corpses) drawUnit(cg, s, 1, 4, 3); cg.globalAlpha = 1; B.corpses.length = 0; }
+  if (B.corpses.length) { for (const s of B.corpses) { const cx = Math.floor(s.x / CK), cy = Math.floor(s.y / CK); const cg = corpseChunk(cx, cy).getContext('2d'); cg.save(); cg.translate(-cx * CK, -cy * CK); cg.globalAlpha = 0.85; drawUnit(cg, s, 1, 4, 3); cg.restore(); } B.corpses.length = 0; }
   draw(); drawMini(); hud();
   raf = requestAnimationFrame(frame);
 }
@@ -206,7 +244,9 @@ function draw() {
   const d = cam.dpr; g.setTransform(d, 0, 0, d, 0, 0); g.imageSmoothingEnabled = false;
   g.fillStyle = '#111'; g.fillRect(0, 0, innerWidth, innerHeight);
   g.setTransform(cam.z * d, 0, 0, cam.z * d, (innerWidth / 2 - cam.x * cam.z) * d, (innerHeight / 2 - cam.y * cam.z) * d);
-  g.drawImage(groundCanvas, 0, 0); g.drawImage(corpseCanvas, 0, 0);
+  { const vw = innerWidth / cam.z, vh = innerHeight / cam.z, vx = cam.x - vw / 2, vy = cam.y - vh / 2;
+    for (let cy = Math.max(0, Math.floor(vy / CK)); cy <= Math.min(Math.ceil(B.fh / CK) - 1, Math.floor((vy + vh) / CK)); cy++)
+      for (let cx = Math.max(0, Math.floor(vx / CK)); cx <= Math.min(Math.ceil(B.fw / CK) - 1, Math.floor((vx + vw) / CK)); cx++) { g.drawImage(groundChunk(cx, cy), cx * CK, cy * CK); const cc = cChunks.get(cx + ',' + cy); if (cc) g.drawImage(cc, cx * CK, cy * CK); } }
   // fire zones
   for (const f of B.fires) {
     if (!f.hit) { // incoming volley
@@ -241,7 +281,7 @@ function draw() {
       g.font = `700 ${Math.round(14 / Math.max(0.6, cam.z) * 1)}px sans-serif`; g.textAlign = 'center';
       g.fillStyle = 'rgba(16,12,8,.8)'; g.beginPath(); g.arc(c.x, gy - 5, 11 / Math.max(0.6, cam.z), 0, 7); g.fill();
       g.strokeStyle = div.pending ? `rgba(255,215,106,${0.5 + 0.5 * Math.sin(B.t * 6)})` : '#ffd76a'; g.lineWidth = 1.5 / cam.z; g.stroke();
-      g.fillStyle = div.pending ? '#ffd76a' : '#fff4dc'; g.fillText(GLYPH[ord] || '•', c.x, gy);
+      g.fillStyle = div.pending ? '#ffd76a' : '#fff4dc'; g.fillText(glyphOf(ord), c.x, gy);
     }
     if (div.side === mySide && div.pending) { const m = div.pending; g.strokeStyle = 'rgba(255,215,106,.6)'; g.setLineDash([4, 5]); g.lineWidth = 1.5 / cam.z; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(div.officer.x, div.officer.y); g.stroke(); g.setLineDash([]); }
   }
@@ -271,7 +311,7 @@ function draw() {
   }
   // trees on top (cover)
   const tiles = images['g_' + B.terrain];
-  for (const t of B.trees) g.drawImage(tiles, t.alt && !['plains', 'forest'].includes(B.terrain) ? 112 : 96, 16, 16, 16, t.x - 12, t.y - 20, 24, 24);
+  if (!B.map) for (const t of B.trees) g.drawImage(tiles, t.alt && !['plains', 'forest'].includes(B.terrain) ? 112 : 96, 16, 16, 16, t.x - 12, t.y - 20, 24, 24);
   // HQ tents
   if (!B.bases.length) for (const s of B.sides) { g.fillStyle = s.color; g.fillRect(s.hq.x - 8, s.hq.y - 8, 16, 16); g.fillStyle = '#fff'; g.font = 'bold 10px sans-serif'; g.textAlign = 'center'; g.fillText('HQ', s.hq.x, s.hq.y + 4); }
 }
@@ -279,6 +319,10 @@ function draw() {
 function drawMini() {
   const W = mini.width, H = mini.height, sx = W / B.fw, sy = H / B.fh;
   mg.fillStyle = 'rgba(20,16,12,.85)'; mg.fillRect(0, 0, W, H);
+  if (B.map) {
+    if (!mini._paths || mini._rev !== B.map.rev) { const c = document.createElement('canvas'); c.width = W; c.height = H; const m = c.getContext('2d'); const R = B.map.raster; m.fillStyle = 'rgba(160,130,90,.55)'; for (let gy = 0; gy < R.gh; gy += 2) for (let gx = 0; gx < R.gw; gx += 2) if (R.walk[gy * R.gw + gx]) m.fillRect(gx * R.cell * sx, gy * R.cell * sy, 2 * R.cell * sx + 0.6, 2 * R.cell * sy + 0.6); mini._paths = c; mini._rev = B.map.rev; }
+    mg.drawImage(mini._paths, 0, 0);
+  }
   for (const s of B.soldiers) { if (!s.alive || s.fled || Math.random() < 0.5) continue; mg.fillStyle = s.div.routed ? '#888' : s.div.color; mg.fillRect(s.x * sx, s.y * sy, 1.5, 1.5); }
   for (const b of B.bases) { mg.strokeStyle = B.sides[b.side].color; mg.lineWidth = b.kind === 'main' ? 2 : 1; mg.beginPath(); mg.arc(b.x * sx, b.y * sy, Math.max(3, b.r * sx), 0, 7); mg.stroke(); }
   for (const f of B.fires) if (B.t < f.end) { mg.fillStyle = 'rgba(255,120,40,.6)'; mg.beginPath(); mg.arc(f.x * sx, f.y * sy, f.r * sx, 0, 7); mg.fill(); }
@@ -308,13 +352,13 @@ function renderDivCards() {
   const showSides = spectator ? [0, 1] : [mySide];
   box.classList.toggle('two', !!spectator);
   box.innerHTML = B.divisions.filter(d => showSides.includes(d.side) && !d.garrison).map(d => {
-    const alive = B.aliveCount(d); const st = d.routed ? 'Routing!' : alive <= 0 ? 'Destroyed' : d.pending ? `Messenger: ${ORDERS[d.pending.order]} (${Math.max(0, d.pending.eta - B.t).toFixed(0)}s)` : ORDERS[d.state] || d.state;
+    const alive = B.aliveCount(d); const st = d.routed ? 'Routing!' : alive <= 0 ? 'Destroyed' : d.pending ? `Messenger: ${orderLabel(d.pending.order)} (${Math.max(0, d.pending.eta - B.t).toFixed(0)}s)` : orderLabel(d.state);
     if (spectator) return `<button class="bdiv mini ${d.routed ? 'rout' : ''}" data-b="sel" data-id="${d.id}" style="border-top:3px solid ${d.color}"><span class="bdname">${esc(d.reserve ? 'Reserve' : d.officer.name)}</span><span class="bdcount">${alive}</span><span class="bmor"><i style="width:${Math.max(0, Math.min(100, d.morale))}%;background:${d.morale < 30 ? '#e2553f' : d.morale < 55 ? '#e0b040' : '#6fbf73'}"></i></span></button>`;
     const portrait = `<span class="bport" style="background:url(assets/units/${d.faction}.png) 0 -${d.unit * 28}px / 560px auto no-repeat"></span>`;
     return `<button class="bdiv ${d === sel ? 'on' : ''} ${d.routed ? 'rout' : ''} ${d.reserve ? 'res' : ''}" data-b="sel" data-id="${d.id}">
       <span class="bdname">${portrait}${esc(d.reserve ? "Lord's reserve" : d.officer.name)}</span><span class="bdcount">${alive}</span>
       <span class="bmor"><i style="width:${Math.max(0, Math.min(100, d.morale))}%;background:${d.morale < 30 ? '#e2553f' : d.morale < 55 ? '#e0b040' : '#6fbf73'}"></i></span>
-      <span class="bdst">${esc(d.reserve ? d.unitName : d.officer.alive ? (d.officer.captured ? d.unitName + ' · captured' : d.unitName) : d.unitName + ' · slain')} · ${d.pending ? '<b style="color:#ffd76a">' + GLYPH[d.pending.order] + '</b> ' : GLYPH[d.state] ? GLYPH[d.state] + ' ' : ''}${esc(st)}</span></button>`;
+      <span class="bdst">${esc(d.reserve ? d.unitName : d.officer.alive ? (d.officer.captured ? d.unitName + ' · captured' : d.unitName) : d.unitName + ' · slain')} · ${d.pending ? '<b style="color:#ffd76a">' + glyphOf(d.pending.order) + '</b> ' : glyphOf(d.state) + ' '}${esc(st)}</span></button>`;
   }).join('');
   box.scrollLeft = keep;
 }
@@ -332,7 +376,7 @@ function openOrders(div) {
     return;
   }
   box.innerHTML = `<div class="bordtitle">${esc(div.unitName)} · ${esc(div.officer.name)}<button class="bbtn" data-b="closeorders">✕</button></div>
-    <div class="bordgrid">${Object.entries(ORDERS).map(([k, l]) => `<button class="bbtn ${div.pending && div.pending.order === k ? 'pend' : !div.pending && div.state === k ? 'on' : ''}" data-b="order" data-o="${k}">${GLYPH[k]} ${l}</button>`).join('')}</div>
+    <div class="bordgrid">${Object.entries(B.map ? MAP_ORDERS : ORDERS).map(([k, l]) => `<button class="bbtn ${div.pending && div.pending.order === k ? 'pend' : !div.pending && div.state === k ? 'on' : ''}" data-b="order" data-o="${k}">${GLYPH[k]} ${l}</button>`).join('')}${B.map ? `<button class="bbtn ${goingTo ? 'on' : ''}" data-b="goto">📍 ${goingTo ? 'Tap a base…' : 'Go to a base'}</button>` : ''}</div>
     ${div.pending ? `<div class="sub" style="margin-top:6px;color:#ffd76a">Messenger riding with "${ORDERS[div.pending.order]}": about ${Math.max(0, div.pending.eta - B.t).toFixed(0)}s away.</div>` : ''}
     <div class="sub" style="margin-top:6px">Leadership ${div.officer.stats.lea}: a messenger takes about ${(Math.hypot(div.officer.x - B.sides[mySide].hq.x, div.officer.y - B.sides[mySide].hq.y) / (150 * (0.8 + div.officer.stats.lea * 0.025))).toFixed(1)}s to reach them.</div>`;
 }
@@ -374,13 +418,19 @@ function bindInput() {
     if (b === 'fire' && !B.sides[mySide].fireUsed) { targeting = !targeting; }
     if (b === 'zoom') cam.z = cam.z > MID + 0.1 ? MID : 1.6;
     if (b === 'sel') { cam.follow = false; const d = B.divisions[+t.dataset.id]; openOrders(d); const c = d.c || B.centroid(d); cam.x = c.x; cam.y = c.y; }
+    if (b === 'goto' && sel) { goingTo = !goingTo; targeting = false; openOrders(sel); return; }
     if (b === 'closeorders') { sel = null; root.querySelector('#border').hidden = true; }
-    if (b === 'order' && sel) { const o = t.dataset.o; B.issue(sel, o); openOrders(sel); const label = ORDERS[o] || RESERVE_ORDERS[o.split(':')[0]] + (o.startsWith('follow:') ? ': ' + B.divisions[+o.slice(7)].officer.name : ''); toasts.push({ text: `Messenger rides to ${sel.reserve ? 'your reserve' : sel.officer.name}: ${label}`, cls: 'strat', at: performance.now() }); }
+    if (b === 'order' && sel) { const o = t.dataset.o; B.issue(sel, o); openOrders(sel); const label = orderLabel(o) + (o.startsWith('follow:') ? ': ' + B.divisions[+o.slice(7)].officer.name : ''); toasts.push({ text: `Messenger rides to ${sel.reserve ? 'your reserve' : sel.officer.name}: ${label}`, cls: 'strat', at: performance.now() }); }
   });
 }
 function tapAt(x, y) {
   const w = screenToWorld(x, y);
   if (targeting) { B.fireAttack(mySide, w.x, w.y); targeting = false; return; }
+  if (goingTo && sel && B.map) { // send the officer down the roads to the base nearest the tap
+    const base = B.bases.slice().sort((a, b) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(b.x - w.x, b.y - w.y))[0];
+    const node = base && Math.hypot(base.x - w.x, base.y - w.y) < base.r + 120 ? nearestNode(B.map, base.x, base.y) : nearestNode(B.map, w.x, w.y);
+    B.issue(sel, 'goto:' + node); goingTo = false; toasts.push({ text: `Messenger rides to ${sel.reserve ? 'your reserve' : sel.officer.name}: go to ${base && Math.hypot(base.x - w.x, base.y - w.y) < base.r + 120 ? base.name : 'that road'}`, cls: 'strat', at: performance.now() }); openOrders(sel); return;
+  }
   let best = null, bd = (64 / cam.z) ** 2 + 900;
   for (const d of B.divisions) {
     if (d.side !== mySide || B.aliveCount(d) <= 0 || B.sides[mySide].ai) continue;
