@@ -1,6 +1,6 @@
 # The Dynasty: Warlord
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v3.1
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v3.2
 
 You command an army and nothing else. Fight garrison-versus-garrison battles against CPU warlords on Dynasty Warriors-style road maps of up to 30,000 troops, win rewards, and build your army up between battles.
 
@@ -8,18 +8,24 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 
 The original world sim still lives at **[/classic](https://dianteclark.github.io/thedynasty/classic/)**.
 
-## How to play (3.1)
+## How to play
 
 1. Pick your culture, your enemy's culture and style, the army size (4,000 to 30,000) and the terrain, then **Fight**.
 2. Each side has 3 to 5 bases with dormant garrisons, joined by roads, passes, bridges and fords through woods, ridges and rivers. Take the enemy's main camp to win.
 3. Tap an officer card to order it: hold, advance, charge, take another road, fall back to camp, or 📍 go to a base you tap on the map.
 4. If time runs out, the side holding more bases wins, then the side with more troops standing.
+5. **Stratagems:** you hold four cards and earn a command point (⚡) every 6 seconds, up to 10. Tap a card, then its target: Fire arrows (a spot), War drums (rally everyone), Forced march and Shield wall (your division), Sow discord (theirs), Rockfall (a pass or road), Burn the bridge, or a Relief column from your camp. The enemy plays the same deck.
+6. **Nature:** landslides, collapsing bridges, floods, wildfires and storms strike during battle, warned by ⚠ a few seconds before. A closed road reroutes everyone onto the others. Turn it off with "Calm skies".
 
 ## Credits
 
 All art is from the **HAS (Heroic Fantasy)** pixel art packs by **Aleksandr Makarov** ([@IknowKingRabbit](https://twitter.com/IknowKingRabbit)), used under the pack's license, which allows commercial and modified use with attribution.
 
 ## Development history
+
+## 3.2: stratagems and nature
+
+A deck of stratagem cards for both sides, played with command points that refill during battle, and battlefield events that close roads (landslides, bridge collapses, floods), burn them (wildfires) or ground the archers (storms). The roads out of each main camp can't be closed, and nothing may cut a base off.
 
 ## 3.1: road battle maps
 

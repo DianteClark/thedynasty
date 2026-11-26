@@ -2,6 +2,7 @@
 import { Battle, FIELD, ORDERS, UNITS, RESERVE_ORDERS, layoutBases, fieldFor, BASE_CAPS } from './battle.js';
 import { BUILDINGS, BIOMES } from '../assets/world/world.js';
 import { walkable, nearestNode } from './bmap.js';
+import { CARDS, CP_MAX, CP_EVERY, cardBlock, canClose } from './strat.js';
 import { CULTURES, cultureById } from './names.js';
 
 const FACTIONS = Object.keys(UNITS);
@@ -12,7 +13,7 @@ const SIZES = { skirmish: 0.45, battle: 1, war: 1.6 };
 const GLYPH = { hold: '■', advance: '➜', charge: '⚔', flankL: '↰', flankR: '↱', retreat: '↩', defend: '◈', push: '»', follow: '⇢' };
 const MID = 0.9;
 const MAP_ORDERS = { hold: 'Hold position', advance: 'Advance', charge: 'Charge', flankL: 'Take another road', retreat: 'Fall back to camp' };
-let goingTo = false;
+let goingTo = false, cardSel = null; // cardSel: { slot, id, edges } while a stratagem card waits for a target
 const orderLabel = o => !o ? '' : o.startsWith('goto:') ? 'Marching to a base' : o.startsWith('follow') ? RESERVE_ORDERS.follow : (B && B.map ? MAP_ORDERS[o] : null) || ORDERS[o] || RESERVE_ORDERS[o] || o;
 const glyphOf = o => !o ? '•' : o.startsWith('goto:') ? '📍' : GLYPH[o] || '•'; // the camera never zooms out past Mid: you follow your officers, not the whole field
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -118,6 +119,7 @@ function startBattle() {
 
 // Command your own side in a battle from the living world.
 export async function commandBattle(cfg, info, side, onDone) {
+  window.__wl = { B: () => B, cam: () => cam }; // for the automated tests
   await loadAssets();
   B = new Battle(cfg);
   spectator = null; command = { info, onDone }; mySide = side;
@@ -144,7 +146,7 @@ function buildScreen() {
       <div class="bspeed">${[['pause', '❚❚'], ['1', '1×'], ['2', '2×'], ['4', '4×']].map(([k, l]) => `<button class="bbtn ${k === '1' ? 'on' : ''}" data-b="speed" data-v="${k}">${l}</button>`).join('')}</div></div>
     <div class="btoasts" id="btoasts"></div>
     <canvas class="bmini" width="160" height="100"></canvas>
-    ${spectator ? '<button class="bbtn fire" data-b="skip">⏭ Skip to the end</button>' : `<div class="bfirebar"><button class="bbtn" data-b="fire">🔥 Fire volley</button>${command ? '<button class="bbtn" data-b="handover">🎖 Let your generals finish</button>' : ''}</div>`}
+    ${spectator ? '<button class="bbtn fire" data-b="skip">⏭ Skip to the end</button>' : `<div class="bfirebar">${B.cards ? '<div class="bcardtip" id="bcardtip" hidden></div><div class="bcards" id="bcards"></div>' : '<button class="bbtn" data-b="fire">🔥 Fire volley</button>'}${command ? '<button class="bbtn" data-b="handover">🎖 Let your generals finish</button>' : ''}</div>`}
     <div class="bdivs" id="bdivs"></div>
     <div class="border" id="border" hidden></div>
     <div class="bresult" id="bresult" hidden></div>`;
@@ -157,13 +159,13 @@ function buildScreen() {
   fit(); window.addEventListener('resize', fit); root._fit = fit;
   if (!spectator) { const own = B.divisions.filter(d => d.side === mySide && !d.garrison && !d.reserve); if (own.length) { const first = B.map ? own[0] : null; cam.x = first ? first.cx : own.reduce((a, d) => a + d.cx, 0) / own.length + (mySide === 0 ? 120 : -120); cam.y = first ? first.cy : own.reduce((a, d) => a + d.cy, 0) / own.length; } }
   bindInput();
-  seenEvents = 0; sel = null; targeting = false; speed = 1; paused = false; lastT = performance.now(); acc = 0; if (!spectator) toasts = [];
+  seenEvents = 0; sel = null; targeting = false; cardSel = null; goingTo = false; groundRev = B.map ? B.map.rev : 0; speed = 1; paused = false; lastT = performance.now(); acc = 0; if (!spectator) toasts = [];
   renderDivCards();
   raf = requestAnimationFrame(frame);
 }
 
 // the field is drawn in 512px chunks, only where the camera looks (big maps would not fit one canvas)
-const CK = 512; let gChunks = new Map(), cChunks = new Map();
+const CK = 512; let gChunks = new Map(), cChunks = new Map(), groundRev = 0;
 function hsh(x, y, k = 0) { let h = (x * 374761393 + y * 668265263 + k * 1442695041) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function buildGround() { gChunks = new Map(); cChunks = new Map(); }
 function groundChunk(cx, cy) {
@@ -175,7 +177,9 @@ function groundChunk(cx, cy) {
   const M = B.map;
   if (M) {
     const bi = Math.max(0, BIOMES.indexOf(B.terrain)); const riverX = M.w / 2;
-    const isWater = (x, y) => M.river && Math.abs(x - riverX) < 95 + Math.sin(y / 140) * 25;
+    const closed = M.edges.filter(e => e.closed && !e.open), near = (e, x, y, pad) => { const a = M.nodes[e.a], b = M.nodes[e.b]; const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / L)); return Math.hypot(x - a.x - dx * t, y - a.y - dy * t) < e.w / 2 + pad; };
+    const isWater = (x, y) => (M.river && Math.abs(x - riverX) < 95 + Math.sin(y / 140) * 25) || closed.some(e => e.closed === 'flood' && near(e, x, y, 0));
+    const isSlide = (x, y) => closed.some(e => e.closed === 'slide' && near(e, x, y, 24));
     // roads: packed earth over the grass; bridges over the river
     for (let y = y0; y < y0 + CK; y += 16) for (let x = x0; x < x0 + CK; x += 16) {
       const w = walkable(M, x + 8, y + 8);
@@ -192,8 +196,8 @@ function groundChunk(cx, cy) {
     const objs = [];
     for (let y = y0 - 32; y < y0 + CK + 32; y += 16) for (let x = x0 - 32; x < x0 + CK + 32; x += 16) {
       if (walkable(M, x + 8, y + 8) || isWater(x + 8, y + 8) || x < 0 || y < 0 || x >= M.w || y >= M.h) continue;
-      const rocky = B.terrain === 'mountain' || B.terrain === 'wasteland' || (B.terrain !== 'forest' && hsh(x >> 7, y >> 7, 6) < 0.35);
-      if (rocky && hsh(x, y, 7) < 0.55) objs.push({ y: y + 14, f: () => gg.drawImage(images.terrain, 5 * 32, 40, 32, 32, x - 8 + hsh(x, y, 8) * 4, y - 14, 32, 32) });
+      const rocky = isSlide(x, y) || B.terrain === 'mountain' || B.terrain === 'wasteland' || (B.terrain !== 'forest' && hsh(x >> 7, y >> 7, 6) < 0.35);
+      if (rocky && (hsh(x, y, 7) < 0.55 || isSlide(x, y))) objs.push({ y: y + 14, f: () => gg.drawImage(images.terrain, 5 * 32, 40, 32, 32, x - 8 + hsh(x, y, 8) * 4, y - 14, 32, 32) });
       else for (let k = 0; k < 2; k++) if (hsh(x, y, 9 + k) < 0.8) { const ox = hsh(x, y, 11 + k) * 10 - 5, oy = hsh(x, y, 13 + k) * 8 - 4, v = hsh(x, y, 15 + k) < 0.5 ? 0 : 1; const tb = rocky ? 5 : bi === 0 ? 1 : bi; objs.push({ y: y + oy + 12, f: () => gg.drawImage(images.terrain, tb * 48 + v * 24, 16, 24, 24, x - 4 + ox, y - 10 + oy, 24, 24) }); }
     }
     objs.sort((a, b) => a.y - b.y).forEach(o => o.f());
@@ -241,6 +245,7 @@ function draw() {
     }
   }
   clampCam();
+  if (B.map && B.map.rev !== groundRev) { groundRev = B.map.rev; gChunks = new Map(); if (cardSel) cardSel.edges = eligibleEdges(cardSel.id); }
   const d = cam.dpr; g.setTransform(d, 0, 0, d, 0, 0); g.imageSmoothingEnabled = false;
   g.fillStyle = '#111'; g.fillRect(0, 0, innerWidth, innerHeight);
   g.setTransform(cam.z * d, 0, 0, cam.z * d, (innerWidth / 2 - cam.x * cam.z) * d, (innerHeight / 2 - cam.y * cam.z) * d);
@@ -257,6 +262,21 @@ function draw() {
       g.fillStyle = `rgba(255,${90 + Math.random() * 60},30,${0.18 + Math.random() * 0.08})`; g.beginPath(); g.arc(f.x, f.y, f.r, 0, 7); g.fill();
       for (let i = 0; i < 10; i++) { const a = Math.random() * 6.28, rr = Math.random() * f.r * 0.8; g.drawImage(images.ammo, 16, 0, 8, 8, f.x + Math.cos(a) * rr - 8, f.y + Math.sin(a) * rr - 8, 16, 16); }
     }
+  }
+  // wildfires on the roads
+  for (const h of B.hazards || []) if (B.t < h.end) {
+    g.fillStyle = `rgba(255,${80 + Math.random() * 60},20,${0.16 + Math.random() * 0.06})`; g.beginPath(); g.arc(h.x, h.y, h.r, 0, 7); g.fill();
+    for (let i = 0; i < 16; i++) { const a = Math.random() * 6.28, rr = Math.random() * h.r * 0.9; g.drawImage(images.ammo, 16, 0, 8, 8, h.x + Math.cos(a) * rr - 8, h.y + Math.sin(a) * rr - 8, 16, 16); }
+  }
+  // warnings: something is about to happen here
+  for (const w of B.warns || []) { const p = 0.5 + 0.5 * Math.sin(B.t * 8); g.strokeStyle = `rgba(255,90,60,${0.5 + p * 0.5})`; g.lineWidth = 4 / cam.z; g.setLineDash([12, 8]); g.beginPath(); g.arc(w.x, w.y, 110 + p * 20, 0, 7); g.stroke(); g.setLineDash([]); g.font = `700 ${Math.round(30 / Math.max(0.6, cam.z))}px sans-serif`; g.textAlign = 'center'; g.fillStyle = '#ffb04a'; g.fillText('⚠', w.x, w.y + 10); }
+  // a stratagem waiting for its target: show what it can be played on
+  if (cardSel) {
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 160);
+    if (cardSel.edges) for (const e of cardSel.edges) { const a = B.map.nodes[e.a], b = B.map.nodes[e.b]; g.lineCap = 'round'; g.strokeStyle = `rgba(255,215,106,${0.12 + pulse * 0.16})`; g.lineWidth = e.w; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.lineCap = 'butt';
+      g.strokeStyle = `rgba(255,215,106,${pulse})`; g.lineWidth = 8 / cam.z; g.setLineDash([24, 14]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.setLineDash([]); }
+    const tk = CARDS[cardSel.id].target;
+    if (tk === 'own' || tk === 'foe') for (const dv of B.divisions) { if (dv.garrison || dv.routed || B.aliveCount(dv) <= 0 || (tk === 'own') !== (dv.side === mySide)) continue; const c = dv.c || B.centroid(dv); g.strokeStyle = tk === 'own' ? `rgba(120,200,255,${pulse})` : `rgba(255,110,90,${pulse})`; g.lineWidth = 3 / cam.z; g.beginPath(); g.arc(c.x, c.y, dv.cols * dv.spacing * 0.8 + 10, 0, 7); g.stroke(); }
   }
   // bases: palisade ring in the owner's colour, the building, and how many still hold it
   for (const b of B.bases) {
@@ -313,6 +333,12 @@ function draw() {
   const tiles = images['g_' + B.terrain];
   if (!B.map) for (const t of B.trees) g.drawImage(tiles, t.alt && !['plains', 'forest'].includes(B.terrain) ? 112 : 96, 16, 16, 16, t.x - 12, t.y - 20, 24, 24);
   // HQ tents
+  if (B.storm) { // rain and gloom, drawn over the field in screen space
+    g.setTransform(d, 0, 0, d, 0, 0); g.fillStyle = 'rgba(20,28,40,.32)'; g.fillRect(0, 0, innerWidth, innerHeight);
+    g.strokeStyle = 'rgba(190,210,235,.35)'; g.lineWidth = 1; g.beginPath(); const T = performance.now() / 4;
+    for (let i = 0; i < 140; i++) { const x = (i * 97.13 + T * 0.9) % (innerWidth + 60) - 30, y = (i * 53.7 + T * 2.3) % (innerHeight + 40) - 20; g.moveTo(x, y); g.lineTo(x - 5, y + 14); }
+    g.stroke(); return;
+  }
   if (!B.bases.length) for (const s of B.sides) { g.fillStyle = s.color; g.fillRect(s.hq.x - 8, s.hq.y - 8, 16, 16); g.fillStyle = '#fff'; g.font = 'bold 10px sans-serif'; g.textAlign = 'center'; g.fillText('HQ', s.hq.x, s.hq.y + 4); }
 }
 
@@ -326,6 +352,8 @@ function drawMini() {
   for (const s of B.soldiers) { if (!s.alive || s.fled || Math.random() < 0.5) continue; mg.fillStyle = s.div.routed ? '#888' : s.div.color; mg.fillRect(s.x * sx, s.y * sy, 1.5, 1.5); }
   for (const b of B.bases) { mg.strokeStyle = B.sides[b.side].color; mg.lineWidth = b.kind === 'main' ? 2 : 1; mg.beginPath(); mg.arc(b.x * sx, b.y * sy, Math.max(3, b.r * sx), 0, 7); mg.stroke(); }
   for (const f of B.fires) if (B.t < f.end) { mg.fillStyle = 'rgba(255,120,40,.6)'; mg.beginPath(); mg.arc(f.x * sx, f.y * sy, f.r * sx, 0, 7); mg.fill(); }
+  for (const w of B.warns || []) { mg.fillStyle = '#ff5a3c'; mg.beginPath(); mg.arc(w.x * sx, w.y * sy, 4 + Math.sin(B.t * 8) * 1.5, 0, 7); mg.fill(); }
+  for (const h of B.hazards || []) if (B.t < h.end) { mg.fillStyle = 'rgba(255,120,40,.6)'; mg.beginPath(); mg.arc(h.x * sx, h.y * sy, h.r * sx, 0, 7); mg.fill(); }
   const hw = innerWidth / 2 / cam.z, hh = innerHeight / 2 / cam.z;
   mg.strokeStyle = '#ffd76a'; mg.lineWidth = 1; mg.strokeRect((cam.x - hw) * sx, (cam.y - hh) * sy, hw * 2 * sx, hh * 2 * sy);
 }
@@ -335,6 +363,7 @@ let lastCards = 0;
 function hud() {
   root.querySelector('#btime').textContent = fmt(B.t) + (B.bases.length ? ` · ◆ ${B.basesHeld(mySide)} v ${B.basesHeld(1 - mySide)}` : '');
   const fb = root.querySelector('[data-b=fire]'); if (fb) { fb.hidden = B.sides[mySide].canFire === false; fb.disabled = B.sides[mySide].fireUsed || !!B.sides[mySide].ai; fb.classList.toggle('on', targeting); fb.textContent = targeting ? 'Tap the map to aim…' : B.sides[mySide].fireUsed ? '🔥 Volley spent' : '🔥 Fire volley'; }
+  if (B.cards) renderCards();
   while (seenEvents < B.events.length) { const e = B.events[seenEvents++]; if (e.t > 0.1) toast(e); }
   const tb = root.querySelector('#btoasts'); const now = performance.now();
   toasts = toasts.filter(t => now - t.at < 5000); tb.innerHTML = toasts.slice(-4).map(t => `<div class="btoast ${t.cls}">${esc(t.text)}</div>`).join('');
@@ -344,8 +373,43 @@ function hud() {
 function toast(e) {
   if (spectator) { toasts.push({ text: e.text, cls: e.kind === 'strat' ? 'strat' : '', at: performance.now() }); return; }
   const mine = e.side === mySide; let cls = '';
-  if (e.kind === 'bad') cls = mine ? 'bad' : 'good'; else if (e.kind === 'good') cls = mine ? 'good' : 'bad'; else if (e.kind === 'strat') cls = 'strat';
+  if (e.kind === 'bad') cls = mine ? 'bad' : 'good'; else if (e.kind === 'good') cls = mine ? 'good' : 'bad'; else if (e.kind === 'strat') cls = 'strat'; else if (e.kind === 'warn') cls = 'warn';
   toasts.push({ text: e.text, cls, at: performance.now() });
+}
+let cardsKey = '';
+function renderCards() {
+  const side = B.sides[mySide]; const box = root.querySelector('#bcards'); if (!box) return;
+  const key = side.hand.join() + '|' + side.cp + '|' + (cardSel ? cardSel.slot : '') + '|' + !!side.ai + '|' + !!B.storm;
+  const pct = Math.round((side.cp >= CP_MAX ? 1 : side.cpT / CP_EVERY) * 100);
+  if (key !== cardsKey) {
+    cardsKey = key;
+    box.innerHTML = `<span class="bcp" title="Command points"><b>${side.cp}</b><small>⚡</small><i><u style="width:${pct}%"></u></i></span>` + side.hand.map((id, i) => { const c = CARDS[id]; const off = side.cp < c.cost || !!side.ai || (id === 'fire' && B.storm); return `<button class="bcard ${cardSel && cardSel.slot === i ? 'on' : ''} ${off ? 'off' : ''}" data-b="card" data-i="${i}" aria-label="${esc(c.name)}"><span>${c.icon}</span><small>${c.cost}</small></button>`; }).join('');
+  } else { const u = box.querySelector('.bcp u'); if (u) u.style.width = pct + '%'; }
+  const tip = root.querySelector('#bcardtip');
+  if (cardSel) { const c = CARDS[cardSel.id]; const need = { point: 'Tap the map to aim.', own: 'Tap one of your divisions.', foe: 'Tap an enemy division.' }[c.target] || (c.target.startsWith('edge') ? 'Tap a glowing road.' : ''); const html = `<b>${c.icon} ${esc(c.name)}</b> · ${c.cost} ⚡<div>${esc(c.text)}</div><div class="bctnext">${need}</div><button class="bbtn" data-b="cardcancel">Cancel</button>`; if (tip.dataset.k !== cardSel.slot + cardSel.id) { tip.innerHTML = html; tip.dataset.k = cardSel.slot + cardSel.id; } tip.hidden = false; }
+  else if (!tip.hidden) { tip.hidden = true; tip.dataset.k = ''; }
+}
+function eligibleEdges(id) { const t = CARDS[id].target; if (!t.startsWith('edge') || !B.map) return null; const kinds = t.slice(5).split(','); return B.map.edges.filter(e => e.open && kinds.includes(e.kind) && canClose(B, e)); }
+function tryCard(target) {
+  const why = B.playCard(mySide, cardSel.slot, target);
+  if (why) { toasts.push({ text: why, cls: 'bad', at: performance.now() }); return false; }
+  cardSel = null; cardsKey = ''; return true;
+}
+function cardTap(w) {
+  const tk = CARDS[cardSel.id].target;
+  if (tk === 'point') return tryCard({ x: w.x, y: w.y });
+  if (tk === 'own' || tk === 'foe') {
+    let best = null, bd = (90 / cam.z + 40) ** 2;
+    for (const dv of B.divisions) { if (dv.garrison || dv.routed || B.aliveCount(dv) <= 0 || (tk === 'own') !== (dv.side === mySide)) continue; const c = dv.c || B.centroid(dv); const r = dv.cols * dv.spacing * 0.8; const dd = Math.max(0, Math.hypot(c.x - w.x, c.y - w.y) - r) ** 2; if (dd < bd) { bd = dd; best = dv; } }
+    if (!best) { toasts.push({ text: tk === 'own' ? 'Tap closer to one of your divisions.' : 'Tap closer to an enemy division.', cls: 'bad', at: performance.now() }); return; }
+    return tryCard(best.id);
+  }
+  if (cardSel.edges) {
+    let best = null, bd = 90 / cam.z + 60;
+    for (const e of cardSel.edges) { const a = B.map.nodes[e.a], b = B.map.nodes[e.b]; const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((w.x - a.x) * dx + (w.y - a.y) * dy) / L)); const d = Math.hypot(w.x - a.x - dx * t, w.y - a.y - dy * t) - e.w / 2; if (d < bd) { bd = d; best = e; } }
+    if (!best) { toasts.push({ text: 'Tap one of the glowing roads.', cls: 'bad', at: performance.now() }); return; }
+    return tryCard(best.id);
+  }
 }
 function renderDivCards() {
   const box = root.querySelector('#bdivs'); const keep = box.scrollLeft;
@@ -416,6 +480,14 @@ function bindInput() {
     if (b === 'again') { exitBattle(); return startBattle(); }
     if (b === 'speed') { root.querySelectorAll('[data-b=speed]').forEach(x => x.classList.toggle('on', x === t)); if (t.dataset.v === 'pause') paused = true; else { paused = false; speed = +t.dataset.v; } }
     if (b === 'fire' && !B.sides[mySide].fireUsed) { targeting = !targeting; }
+    if (b === 'card') { const i = +t.dataset.i, id = B.sides[mySide].hand[i]; cardsKey = ''; goingTo = false;
+      if (cardSel && cardSel.slot === i) { cardSel = null; return; }
+      const c = CARDS[id]; if (c.target === 'none') { cardSel = { slot: i, id }; const pre = cardBlock(B, mySide, id, null); if (pre) { toasts.push({ text: `${c.icon} ${c.name}: ${pre}`, cls: 'bad', at: performance.now() }); cardSel = null; return; } tryCard(null); return; }
+      cardSel = { slot: i, id, edges: eligibleEdges(id) };
+      if (cardSel.edges && !cardSel.edges.length) { toasts.push({ text: `${c.icon} ${c.name}: there is no ${c.target.slice(5).replace(',', ' or ')} it can close right now.`, cls: 'bad', at: performance.now() }); }
+      if (cardSel.edges && cardSel.edges.length) cam.z = MID;
+      return; }
+    if (b === 'cardcancel') { cardSel = null; cardsKey = ''; return; }
     if (b === 'zoom') cam.z = cam.z > MID + 0.1 ? MID : 1.6;
     if (b === 'sel') { cam.follow = false; const d = B.divisions[+t.dataset.id]; openOrders(d); const c = d.c || B.centroid(d); cam.x = c.x; cam.y = c.y; }
     if (b === 'goto' && sel) { goingTo = !goingTo; targeting = false; openOrders(sel); return; }
@@ -426,6 +498,7 @@ function bindInput() {
 function tapAt(x, y) {
   const w = screenToWorld(x, y);
   if (targeting) { B.fireAttack(mySide, w.x, w.y); targeting = false; return; }
+  if (cardSel) { cardTap(w); return; }
   if (goingTo && sel && B.map) { // send the officer down the roads to the base nearest the tap
     const base = B.bases.slice().sort((a, b) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(b.x - w.x, b.y - w.y))[0];
     const node = base && Math.hypot(base.x - w.x, base.y - w.y) < base.r + 120 ? nearestNode(B.map, base.x, base.y) : nearestNode(B.map, w.x, w.y);

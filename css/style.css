@@ -107,6 +107,7 @@ body.in-battle header.top, body.in-battle .tabs, body.in-battle main { visibilit
 .bspeed { margin-left: auto; display: flex; gap: 4px; }
 .btoasts { position: absolute; top: calc(56px + var(--safe-t)); left: 8px; right: 8px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 .btoast { background: rgba(22,18,13,.88); border-left: 3px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-family: var(--serif); max-width: 520px; }
+.btoast.warn { border-left-color: #ffb04a; color: #ffd9a0; }
 .btoast.good { border-left-color: #6fbf73; } .btoast.bad { border-left-color: #e2553f; } .btoast.strat { border-left-color: #ff8a3d; }
 .bmini { position: absolute; right: 8px; bottom: calc(118px + var(--safe-b)); width: 150px; height: 94px; border: 1px solid var(--line); border-radius: 8px; image-rendering: pixelated; }
 .bbtn.fire, .bfirebar { position: absolute; left: 8px; bottom: calc(118px + var(--safe-b)); }
@@ -225,3 +226,15 @@ button.card { width: 100%; text-align: left; color: var(--ink); font: inherit; d
 .scenetext { width: min(100%, 540px); margin-top: 12px; }
 .scenetext h2 { margin: 0 0 6px; color: var(--gold); }
 .scenetext .abtns { margin-top: 12px; display: grid; gap: 8px; }
+
+/* 3.2 stratagem cards */
+.bcards { display: flex; gap: 5px; align-items: stretch; }
+.bcp { display: grid; grid-template-rows: 1fr auto; justify-items: center; background: rgba(22,18,13,.9); border: 1px solid var(--gold); border-radius: 10px; padding: 3px 6px 4px; min-width: 38px; color: var(--gold); font-family: var(--serif); }
+.bcp b { font-size: 17px; line-height: 1.1; } .bcp small { display: none; }
+.bcp i { display: block; width: 28px; height: 3px; background: #3a2f23; border-radius: 2px; overflow: hidden; } .bcp u { display: block; height: 100%; background: var(--gold); }
+.bcard { position: relative; width: 36px; min-height: 46px; background: linear-gradient(#3a2e20, #241c14); border: 1px solid #8a6a3a; border-radius: 8px; padding: 0; display: grid; place-items: center; color: var(--ink); }
+.bcard span { font-size: 20px; line-height: 1; } .bcard small { position: absolute; top: -6px; right: -6px; background: var(--gold); color: #1b140b; font-weight: 800; font-size: 11px; border-radius: 9px; min-width: 17px; height: 17px; display: grid; place-items: center; }
+.bcard.off { opacity: .45; } .bcard.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); transform: translateY(-4px); }
+.bcardtip { flex-basis: 100%; background: rgba(22,18,13,.96); border: 1px solid var(--gold); border-radius: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.35; }
+.bcardtip b { font-family: var(--serif); font-size: 14px; color: var(--gold); } .bcardtip .bctnext { color: #ffd76a; margin: 4px 0 6px; font-weight: 600; }
+.bcardtip .bbtn { min-height: 30px; padding: 4px 10px; }

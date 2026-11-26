@@ -10,7 +10,7 @@ const view = $('#view');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TERRAINS = ['plains', 'forest', 'swamp', 'wasteland', 'tundra', 'mountain'];
 const SIZES = [4000, 8000, 15000, 30000];
-const setup = { you: 'aldmark', foe: 'orc', size: 8000, terrain: 'plains', ai: 'balanced' };
+const setup = { you: 'aldmark', foe: 'orc', size: 8000, terrain: 'plains', ai: 'balanced', nature: 'on' };
 try { Object.assign(setup, JSON.parse(localStorage.getItem('warlord.quick') || '{}')); } catch (e) { /* ignore */ }
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
@@ -40,7 +40,7 @@ function quickBattle() {
     const mine = map.bases.filter(b => b.side === side); const sw = mine.reduce((a, b) => a + W[b.kind], 0); const f = side ? setup.foe : setup.you;
     for (const b of mine) bases.push({ side, kind: b.kind, fx: b.fx, fy: b.fy, count: Math.max(40, Math.min(BASE_CAPS[b.kind], Math.round(garrison * W[b.kind] / sw))), faction: f, unit: ent(f, b.kind === 'fort' ? ['ranged', 'magic'] : ['inf', 'heavy']), name: (side ? 'their ' : 'your ') + (b.kind === 'main' ? 'main camp' : b.kind) });
   }
-  const cfg = { seed, terrain: setup.terrain, season: 'Summer', map, bases, symmetric: true, sides };
+  const cfg = { seed, terrain: setup.terrain, season: 'Summer', map, bases, symmetric: true, sides, cards: true, events: setup.nature !== 'off' };
   commandBattle(cfg, { title: `${setup.size.toLocaleString()} troops on the ${setup.terrain} · bases ${pattern}` }, 0, b => { lastResult = b.winner === 0 ? 'Victory' : 'Defeat'; render(); });
 }
 let lastResult = null;
@@ -50,7 +50,7 @@ function render() {
   const you = cultureById(setup.you), foe = cultureById(setup.foe);
   view.innerHTML = `
     <div class="card hero-card"><h3>⚔ The Dynasty: Warlord</h3><div class="sub">Lead armies of up to 30,000 down roads, passes and bridges. Burn the enemy's main camp to win. Garrisons guard every base and sleep until you come near.</div>
-      <div class="sub" style="margin-top:6px">Coming next: stratagem cards, landslides and floods, your own persistent army, and a campaign against rival warlords.</div></div>
+      <div class="sub" style="margin-top:6px">Coming next: your own persistent army, and a campaign against rival warlords.</div></div>
     ${lastResult ? `<div class="card"><b>${lastResult}.</b> <span class="sub">Fight another?</span></div>` : ''}
     <h2 class="sec">Quick battle</h2>
     <label class="field"><span>Your army: ${esc(you.name)} (${esc(you.race)})</span></label>${chips('you', CULTURES.map(c => c.id), id => cultureById(id).name)}
@@ -58,7 +58,9 @@ function render() {
     ${chips('ai', ['reckless', 'balanced', 'cautious'], a => a[0].toUpperCase() + a.slice(1) + ' general')}
     <label class="field"><span>Troops on the field (both sides)</span></label>${chips('size', SIZES.map(String), v => (+v).toLocaleString())}
     <label class="field"><span>Battlefield</span></label>${chips('terrain', TERRAINS, t => t[0].toUpperCase() + t.slice(1))}
+    <label class="field"><span>Nature: landslides, collapsing bridges, floods, wildfires and storms</span></label>${chips('nature', ['on', 'off'], v => v === 'on' ? 'Nature strikes' : 'Calm skies')}
     <button class="btn" id="go">Take the field</button>
+    <p class="note">Stratagems: you hold four cards and earn a command point (⚡) every 6 seconds. Tap a card, then tap where it goes: fire on a spot, drums to rally, a forced march or shield wall on your division, discord on theirs, rockfall on a pass, fire on a bridge, or a relief column from camp. Watch for ⚠: nature can close a road under anyone's feet.</p>
     <p class="note">How to fight: tap an officer's card to give orders. "Go to a base" sends them down the roads to any base you tap. Your reserve takes simple orders: defend, push, or reinforce an officer. Zoom out to Mid at most; tap a card to jump to that officer.</p>
     <h2 class="sec">More</h2>
     <a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="classic/">Play The Dynasty (classic): the living-world sim</a>

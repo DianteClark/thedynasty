@@ -40,7 +40,7 @@ Each build is playable on its own and adds one layer. The order follows what eac
 | Phase | Name | What it adds |
 |---|---|---|
 | 3.1 ✅ | Road battle maps | The new main game: quick battles on road networks with lanes, passes, bridges and fords; base layouts per side; Go-to-base orders; the old game moved to /classic |
-| 3.2 | Stratagems and events | Stratagem cards drawn during battle and played with command points that refill; landslides, bridge collapses, floods, wildfires and storms that close roads and force battles onto other paths |
+| 3.2 ✅ | Stratagems and events | Stratagem cards drawn during battle and played with command points that refill; landslides, bridge collapses, floods, wildfires and storms that close roads and force battles onto other paths |
 | 3.3 | Your army | A persistent roster of officers and troop types, recruitment, upgrades, rewards, losses and upkeep |
 | 3.4 | Campaign | CPU warlords with personalities, battles that grow from about 2,000 to 30,000 troops, rivals who remember you |
 | 3.5 | Polish | Balance, a first-hour guide and a full scrub |

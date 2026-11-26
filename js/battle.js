@@ -5,6 +5,7 @@ export const FIELD = { w: 1600, h: 1000 };
 
 import { UNITS } from '../assets/units/units.js';
 import { clampToPath, routeNodes, nearestNode, walkable, buildRaster } from './bmap.js';
+import { initCards, cardsTick, playCard, eventsTick, aiCards } from './strat.js';
 export { UNITS };
 
 const ROLE = {
@@ -82,8 +83,11 @@ export class Battle {
     }
     for (const b of this.bases) b.div = this.divisions.find(d => d.garrison && d.garrison.baseIdx === b.id) || null;
     if (this.map) for (const s of this.soldiers) clampToPath(this.map, s);
+    this.cards = !!cfg.cards; if (this.cards) initCards(this);
+    this.nature = !!(cfg.events && this.map); if (this.nature && !this.cards) { this.hazards = []; this.warns = []; this.reopen = []; }
     this.log(`The battle begins on the ${this.terrain}.`, null);
   }
+  playCard(side, slot, target, scripted = false) { return playCard(this, side, slot, target, scripted); }
 
   makeDivision(side, d, k, n, cfg = {}) {
     const faction = d.faction || side.faction;
@@ -267,6 +271,7 @@ export class Battle {
       if (c.type === 'order') this.issue(this.divisions[c.div], c.order, c.side, true);
       else if (c.type === 'fire') this.fireAttack(c.side, c.x, c.y, true);
       else if (c.type === 'ai') this.sides[c.side].ai = c.style;
+      else if (c.type === 'card') playCard(this, c.side, c.slot, c.target, true);
     }
     this.steps++;
     this.t += dt;
@@ -282,6 +287,8 @@ export class Battle {
     for (const s of this.soldiers) this.updateSoldier(s, dt);
     this.updateProjectiles(dt);
     this.updateFires();
+    if (this.cards) cardsTick(this, dt);
+    if (this.nature) eventsTick(this);
     if (this.bases.length) this.basesTick();
     for (const side of this.sides) if (side.ai) this.ai(side);
     this.checkEnd();
@@ -505,8 +512,8 @@ export class Battle {
   shoot(s, e) {
     const d = Math.hypot(e.x - s.x, e.y - s.y);
     const spd = s.div.role === 'magic' ? 170 : 260;
-    const lead = d / spd;
-    this.projectiles.push({ x: s.x, y: s.y - 6, sx: s.x, sy: s.y - 6, tx: e.x + (this.r() - 0.5) * 14, ty: e.y + (this.r() - 0.5) * 14, t: 0, dur: lead, dmg: s.div.stats.shot * (0.7 + this.r() * 0.6), side: s.side, ammo: s.div.role === 'magic' ? (s.div.faction === 'ashborn' || s.div.faction === 'kharn' ? 2 : 1) : s.div.faction === 'kharn' && s.div.unit === 6 ? 3 : 0, by: s, arc: s.div.role === 'ranged' ? Math.min(60, d * 0.25) : 0 });
+    const lead = d / spd; const wet = this.storm ? 0.55 : 1, wob = this.storm ? 40 : 14;
+    this.projectiles.push({ x: s.x, y: s.y - 6, sx: s.x, sy: s.y - 6, tx: e.x + (this.r() - 0.5) * wob, ty: e.y + (this.r() - 0.5) * wob, t: 0, dur: lead, dmg: s.div.stats.shot * (0.7 + this.r() * 0.6) * wet, side: s.side, ammo: s.div.role === 'magic' ? (s.div.faction === 'ashborn' || s.div.faction === 'kharn' ? 2 : 1) : s.div.faction === 'kharn' && s.div.unit === 6 ? 3 : 0, by: s, arc: s.div.role === 'ranged' ? Math.min(60, d * 0.25) : 0 });
   }
   updateProjectiles(dt) {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
@@ -576,6 +583,7 @@ export class Battle {
       if (d.morale < 30 && !d.inCombat && style !== 'reckless') want = 'retreat';
       if (want !== d.state) this.issue(d, want);
     }
+    if (this.cards) aiCards(this, side);
     // fire attack when the enemy bunches up away from our own troops
     if (!side.fireUsed && this.t > 15) {
       for (const f of foes) {
