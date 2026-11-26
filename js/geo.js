@@ -157,13 +157,16 @@ export function advance(W, obj, dest, landSpeed, seaSpeed) {
   const key = Math.round(dest.x * 10) + ',' + Math.round(dest.y * 10);
   if (obj.pathKey !== key || !obj.path) { obj.path = route(W, obj, dest); obj.pathKey = key; }
   let budget = 1;
+  const trail = [{ x: obj.x, y: obj.y }];
   while (obj.path.length && budget > 1e-6) {
     const wp = obj.path[0]; const sp = wp.sea ? seaSpeed : landSpeed;
     const dx = wp.x - obj.x, dy = wp.y - obj.y, d = Math.hypot(dx, dy);
     const need = d / sp;
     if (need <= budget) { obj.x = wp.x; obj.y = wp.y; budget -= need; obj.path.shift(); }
     else { obj.x += dx / d * sp * budget; obj.y += dy / d * sp * budget; budget = 0; }
+    trail.push({ x: obj.x, y: obj.y });
   }
+  obj.trail = trail;
   obj.atSea = !!(obj.path.length && obj.path[0].sea);
   if (!obj.path.length) { obj.path = null; obj.pathKey = null; obj.atSea = false; return true; }
   return false;

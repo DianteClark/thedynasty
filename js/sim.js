@@ -19,7 +19,8 @@ export const SIZES = {
   enormous: { w: 180, h: 120, setts: 220, conts: 4, isles: 16, label: 'Enormous' },
 };
 // how far things move in a month, in map cells
-export const MOVE = { land: 13, sea: 30 };
+// how far things move in a month: riders and ships are quick, a whole army on the march is slower
+export const MOVE = { land: 39, sea: 90, army: 20, armySea: 45 };
 
 export const SEASONS = ['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer', 'Summer', 'Summer', 'Autumn', 'Autumn', 'Autumn', 'Winter'];
 export const MONTHS = ['Deepfrost', 'Thawmonth', 'Seedtime', 'Rainmonth', 'Bloomtide', 'Highsun', 'Goldmonth', 'Harvestide', 'Reaping', 'Leaffall', 'Mistmonth', 'Longnight'];
@@ -813,10 +814,10 @@ export class World {
     const offs = m.officers.map(id => this.char(id)).filter(o => o && o.alive && !o.prisonerOf && o.realmId === att.id && o.army);
     if (!offs.length) { w.march = null; return; }
     const g = this.grid[Math.max(0, Math.min(this.h - 1, Math.round(m.y)))]?.[Math.max(0, Math.min(this.w - 1, Math.round(m.x)))];
-    let speed = MOVE.land * (this.season === 'Winter' ? 0.7 : 1);
+    let speed = MOVE.army * (this.season === 'Winter' ? 0.7 : 1);
     if (g === 'swamp' || g === 'mountain') speed *= 0.6;
     if (g === 'forest') speed *= 0.8;
-    if (!advance(this, m, target, speed, MOVE.sea)) { for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
+    if (!advance(this, m, target, speed, MOVE.armySea)) { for (const o of offs) { o.x = m.x; o.y = m.y; } return; }
     m.x = target.x; m.y = target.y; w.march = null;
     const dOff = this.realmOfficers(def).filter(o => !o.wounded).sort((x, y) => this.power(y) - this.power(x)).slice(0, 8);
     this.battle(att, def, offs.slice(0, 8), dOff, target, w, m.attackerIsA);

@@ -26,7 +26,16 @@ const tChunks = new Map(), oChunks = new Map(), fChunks = new Map(); let fogKey 
 const BCOL = { water: [34, 66, 104], plains: [112, 168, 76], forest: [44, 112, 54], swamp: [78, 104, 86], wasteland: [196, 168, 104], tundra: [226, 232, 238], mountain: [118, 100, 90] };
 let cam = { x: 0, y: 0, z: 1, follow: true }, raf = 0, sel = null, cb = {}, dpr = 1;
 // movers glide between where they were at the start of the month and where they are now
-function at(key, o) { const p = W._prev && W._prev.get(key); const f = W._frac || 0; return p ? { x: p[0] + (o.x - p[0]) * f, y: p[1] + (o.y - p[1]) * f } : { x: o.x, y: o.y }; }
+function at(key, o) {
+  const p = W._prev && W._prev.get(key); const f = W._frac || 0;
+  if (!p) return { x: o.x, y: o.y };
+  // follow the road actually taken this month (around coasts, through ports), not a straight line
+  const tr = o.trail; if (tr && tr.length > 2 && Math.abs(tr[0].x - p[0]) < 0.01 && Math.abs(tr[0].y - p[1]) < 0.01) {
+    let total = 0; for (let i = 1; i < tr.length; i++) total += Math.hypot(tr[i].x - tr[i - 1].x, tr[i].y - tr[i - 1].y);
+    let want = total * f; for (let i = 1; i < tr.length; i++) { const seg = Math.hypot(tr[i].x - tr[i - 1].x, tr[i].y - tr[i - 1].y); if (want <= seg || i === tr.length - 1) { const k = seg ? Math.min(1, want / seg) : 1; return { x: tr[i - 1].x + (tr[i].x - tr[i - 1].x) * k, y: tr[i - 1].y + (tr[i].y - tr[i - 1].y) * k }; } want -= seg; }
+  }
+  return { x: p[0] + (o.x - p[0]) * f, y: p[1] + (o.y - p[1]) * f };
+}
 
 export async function mountMap(container, world, callbacks) {
   W = world; cb = callbacks;

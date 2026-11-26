@@ -27,7 +27,7 @@ export function renderCreation(view, world, isNewLife) {
     <label class="field"><span>World seed (optional, share it to give a friend the same world)</span><input id="fSeed" value="${esc(form.seed)}" placeholder="random" autocomplete="off"></label>`;
   view.innerHTML = `
     <div class="card hero-card"><h3>${isNewLife ? 'A new life in this world' : 'Begin your story'}</h3>
-      <div class="sub">${isNewLife ? 'The world remembers what came before. Choose who you are now.' : 'A world is born, and you are dropped somewhere in it. Time runs on its own: a month passes every 30 seconds, and you can only pause it. One life; name a successor or your story ends with you.'}</div></div>
+      <div class="sub">${isNewLife ? 'The world remembers what came before. Choose who you are now.' : 'A world is born, and you are dropped somewhere in it. Time runs on its own: a month passes every minute, and you can only pause it. One life; name a successor or your story ends with you.'}</div></div>
     <h2 class="sec">Origin</h2>
     ${ORIGINS.map(o => `<button class="card tap origin ${form.origin === o.id ? 'on' : ''}" data-f="origin" data-v="${o.id}"><b>${o.name}</b><div class="sub">${o.blurb}</div></button>`).join('')}
     <h2 class="sec">Culture</h2>
