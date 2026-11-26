@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.8
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.9
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -245,4 +245,17 @@ The big moments of a life are now small scenes, drawn in HAS art in front of you
 - **Missions for officers:** if you serve a lord, they send for you: scout a rival's seat (and bring back its court's names and titles), carry a letter to another ruler, hunt down a bandit troubling the realm, or come to council. Obey and you're paid and trusted; refuse or fail and your lord remembers.
 - **Your counsel matters:** summoned to council, your lord asks what the realm should do: war, peace or stronger walls. With good Intellect and their trust, they may listen.
 - Officers and lords now bring their own troops when they fight bandits, not just a wanderer's band.
+
+## 2.9: polish and scrub
+
+A full pass over the whole game: long automated runs (up to 150 years, every origin, every world size, random choices and actions, saves and reloads along the way) with checks on the world's data, plus a browser sweep of every screen and flow.
+
+- **Soldiers cost money:** armies, reserves and garrisons are paid each month, and very large treasuries slowly leak away. Realms no longer sit on tens of thousands of gold after a long history, so a throne you inherit comes with a real budget. The Court shows what your soldiers cost each year.
+- **Fallen realms:** when a realm falls, its lords and officers really do take to the road (before, some kept their titles to a realm that no longer existed), and no new officers are raised for a dead realm.
+- **Rulers of two realms:** when someone who rules more than one realm dies, every throne they held now passes on, not just one.
+- A failed rebel leader's death is now handled like any other death.
+- **Decisions:** court matters are dropped cleanly if you lose your throne, matters tied to someone who has died are closed, and funeral cards (whose subject has, by definition, died) are no longer hidden.
+- **Safety:** ruler-only actions politely refuse if you don't rule, and a single failing action or decision can no longer break the game.
+- **Works offline:** every unit sprite, battle ground, the stress test and the example mod are now cached, so battles and ceremonies work without a connection.
+- Small text fixes.
 

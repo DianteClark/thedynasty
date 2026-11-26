@@ -33,4 +33,4 @@ Each build is playable on its own and adds one layer. The order follows what eac
 | 2.6 ✅ | Encounters and petitions | Road encounters, court petitions and camp happenings |
 | 2.7 ✅ | Ceremonies | Coronations, weddings, funerals, oath-swearings, knightings and feasts as sprite scenes |
 | 2.8 ✅ | Diplomacy and missions | Envoys on the map, audiences in person, officer missions and council advice |
-
+| 2.9 ✅ | Polish and scrub | Long automated runs and a full browser sweep; upkeep and treasury balance, fallen-realm and succession fixes, safer decisions and actions, full offline cache |

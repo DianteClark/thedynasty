@@ -352,6 +352,7 @@ export class World {
     return n + 's';
   }
   addOfficer(r, c) {
+    if (!r || !r.alive) { if (c.role === 'officer') c.role = 'vagabond'; c.realmId = null; return; } // no one serves a fallen realm
     c.role = 'officer'; c.realmId = r.id; c.liegeId = r.rulerId; c.settId = r.capital; c.loyalty = this.ri(45, 85);
     if (!c.army) c.army = this.newArmy(c, r.tier === 'Village' ? 0.4 : 1);
     const ruler = this.char(r.rulerId); if (ruler) this.opine(c, ruler, this.ri(10, 40));
@@ -450,6 +451,15 @@ export class World {
       if (r) r.treasury += s.pop * 0.004 * (1 + ((this.steward(r) || this.char(r.rulerId))?.stats.pol || 5) / 20) * (r.tax === 'low' ? 0.6 : r.tax === 'high' ? 1.5 : 1) - GUARD[s.guard].cost * 0.2;
     }
     if (this.month % 2 === 1) for (const r of this.realmList()) this.stewardWork(r);
+    // soldiers must be paid, and a fat treasury leaks: feasts, gifts, and sticky-fingered clerks
+    const armies = new Map();
+    for (const c of this.chars.values()) if (c.alive && c.army && c.realmId && (c.role === 'officer' || c.role === 'ruler')) armies.set(c.realmId, (armies.get(c.realmId) || 0) + c.army.size);
+    for (const r of this.realmList()) {
+      const troops = (armies.get(r.id) || 0) + (r.reserve || 0) + this.realmSetts(r).reduce((x, s) => x + (s.garrison || 0), 0);
+      r.upkeep = troops * 0.004; r.treasury -= r.upkeep;
+      const cap = 500 + 150 * r.setts.size; if (r.treasury > cap) r.treasury -= (r.treasury - cap) * 0.03;
+      if (r.treasury < 0 && !this.isPlayer(this.char(r.rulerId))) { r.reserve = Math.round((r.reserve || 0) * 0.9); } // unpaid men drift home
+    }
     // Food aid to starving neighbours
     if (this.month % 2 === 0) {
       for (const s of this.setts.filter(s => s.famine && !s.destroyed)) {
@@ -489,7 +499,15 @@ export class World {
   killRealm(r, how) {
     r.alive = false; this.stats.realmsFallen += r.tier !== 'Village' ? 1 : 0;
     for (const w of this.wars) if (w.a === r.id || w.b === r.id) w.over = true;
-    for (const c of this.living()) if (c.realmId === r.id && c.role !== 'officer' && c.role !== 'courtier') { /* stays */ }
+    // the fallen realm's people scatter: its lords and officers take to the road
+    for (const c of this.living()) {
+      if (c.realmId !== r.id) continue;
+      const other = this.realmList().find(x => x !== r && x.rulerId === c.id);
+      if (other) { c.realmId = other.id; c.settId = other.capital; continue; } // they still rule elsewhere
+      c.realmId = null; c.liegeId = null;
+      if (c.role === 'ruler' || c.role === 'officer') { c.role = 'vagabond'; c.titles.rank = null; }
+      if (this.isPlayer(c)) { c.mission = null; this.you(`${r.name} is no more. You are a landless wanderer now.`, [], 3); }
+    }
     if (how) this.log(3, 'fall', how, []);
   }
 
@@ -538,7 +556,7 @@ export class World {
       s.unrest = 35; s.pop = Math.round(s.pop * 0.85);
       if (def) { def.army.xp += 20; def.fame += 2; }
       if (ruler && this.has(ruler, 'cruel')) { this.spreadRumor(ruler, 'butcher', 2); }
-      leader.alive = false; leader.died = this.year; leader.cause = 'executed after a failed revolt';
+      this.die(leader, 'executed after a failed revolt');
       this.log(2, 'uprising', `${s.name} revolts over ${cause}, but ${def ? this.fullName(def) : 'the garrison'} crushes the rising. ${this.fullName(leader)} is executed${ruler && this.has(ruler, 'cruel') ? ' and the village is put to the torch' : ''}.`, [leader.id, def?.id].filter(Boolean));
     }
   }
@@ -1517,6 +1535,8 @@ export class World {
       this.log(2, 'death', `${this.fullName(c)}, heir of ${r.name}, dies of ${cause}.${ruler ? ` ${ruler.name} grieves.` : ''}`, [c.id]);
       this.pickHeir(r);
     } else if (c.fame > 25 || c.titles.deed) this.log(2, 'death', `${this.fullName(c)} dies (${cause}).${c.titles.deed ? ` The ${c.titles.deed} passes into legend.` : ''}`, [c.id]);
+    // someone who ruled more than one realm leaves more than one throne empty
+    for (const r2 of this.realmList()) if (r2 !== r && r2.rulerId === c.id) this.succession(r2, c);
     for (const b of c.oath) { const bb = this.char(b); if (bb && bb.alive) { this.opine(bb, c, 10); } }
     const wasPlayer = this.isPlayer(c);
     if (wasPlayer) this.playerDied(c, cause);
@@ -1556,8 +1576,10 @@ export class World {
     const fn = this['act_' + a.type];
     if (!fn) return 'Unknown action.';
     if (a.type !== 'start' && (!this.player || !this.player.alive)) return 'You are no longer among the living.';
-    if (COURT_ACTS.includes(a.type) && this.playerRules() && !this.atSeat()) return `That has to be done from your seat. ${this.awayReason()} Your steward rules until you return.`;
-    const out = fn.call(this, a) || '';
+    if (COURT_ACTS.includes(a.type) && !this.playerRules()) return 'Only a ruler can do that.';
+    if (COURT_ACTS.includes(a.type) && !this.atSeat()) return `That has to be done from your seat. ${this.awayReason()} Your steward rules until you return.`;
+    let out = '';
+    try { out = fn.call(this, a) || ''; } catch (e) { console.error('action failed', a.type, e); return 'That could not be done.'; }
     if (a.type === 'start' && this.player) this.initKnowledge();
     return out;
   }

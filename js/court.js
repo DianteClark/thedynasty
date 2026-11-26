@@ -32,7 +32,7 @@ export function installCourt(World) {
     this.decisions.push(card);
     return card;
   };
-  P.decisionsFor = function () { return (this.decisions || []).filter(d => d.who == null || this.char(d.who)?.alive !== false); };
+  P.decisionsFor = function () { return (this.decisions || []).filter(d => (d.kind === 'ceremony' || d.who == null || this.char(d.who)?.alive !== false) && !(d.court && !this.playerRules())); };
   P.act_decide = function (a) {
     const d = (this.decisions || []).find(x => x.id === a.id); if (!d) return 'That matter is already settled.';
     if (d.court && !this.atSeat()) return 'You must be at your seat to settle court business. Your steward will handle it if you stay away.';
@@ -42,8 +42,10 @@ export function installCourt(World) {
     this.decisions = this.decisions.filter(x => x !== d);
     if (d.key) (this.recentKeys || (this.recentKeys = {}))[d.key] = this.monthIndex;
     const h = HANDLERS[d.kind]; if (!h) return '';
+    if (d.court && !this.playerRules()) return 'That matter no longer concerns you.';
+    if (d.who != null && this.char(d.who) && !this.char(d.who).alive && d.kind !== 'ceremony') return `${this.char(d.who).name} is dead; the matter dies with them.`;
     const opt = d.options.find(o => o.id === choice) || d.options.find(o => o.id === d.def) || d.options[0];
-    return h.call(this, d, opt.id, by) || '';
+    try { return h.call(this, d, opt.id, by) || ''; } catch (e) { console.error('decision failed', d.kind, e); return 'The matter fizzles out.'; }
   };
   P.decisionsTick = function () {
     const p = this.player; if (!p || !p.alive || !this.decisions) return;
