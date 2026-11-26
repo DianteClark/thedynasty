@@ -11,7 +11,7 @@ import { slots, saveWorld, loadWorld, deleteWorld, setCurrent, newSlotId, getMod
 const $ = s => document.querySelector(s);
 const view = $('#view');
 const SAVE_KEY = 'dynasty.save.v2';
-const MONTH_MS = 60000; // one month of the world passes every minute
+const MONTH_MS = 30000; // one month of the world passes every 30 seconds
 const TYPE_LABELS = { you: 'You', war: 'War', battle: 'Battles', peace: 'Peace', succession: 'Succession', assassin: 'Assassins', spy: 'Spies', rumor: 'Rumors', duel: 'Duels', tournament: 'Tournaments', marriage: 'Marriages', monster: 'Monsters', famine: 'Famine', aid: 'Aid', uprising: 'Uprisings', rise: 'Rises', fall: 'Falls', oath: 'Oaths', betrayal: 'Betrayal', ward: 'Wards', merc: 'Mercenaries', bandit: 'Bandits', contract: 'Contracts', unite: 'Unions', army: 'Armies', death: 'Deaths', birth: 'Births' };
 
 let world, playing = true, busy = false, tab = 'you', acc = 0, watchMode = 'big', creatingLife = false;
@@ -447,7 +447,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 3,000 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v2.9. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.10. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 

@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.9
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.10
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -9,7 +9,7 @@ On your phone, open the link and choose **Add to Home Screen**. It runs full-scr
 ## How to play
 
 1. **Create your character** on the 🛡 Household tab: origin, culture (ten of them), name, and ironman or casual.
-2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every minute. You can pause (❚❚), but you can't hurry time: you only control yourself.
+2. **Live:** the 🗺 Map is your main screen and the world runs in real time, one month every 30 seconds. You can pause (❚❚), but you can't hurry time: you only control yourself.
 3. **Act** from the 🏰 Court (or Camp, if you don't rule), the 🛡 Household tab, or by tapping things on the 🗺 Map. Matters that need an answer collect under 📜 at the top: answer them before their deadline or they are settled without you.
 4. **Fight** your battles on the battle map: command them, watch your generals, or resolve them quickly.
 5. **Name a successor.** When you die, you carry on as them. If no one can, your line ends and the world goes on without you.
@@ -258,4 +258,9 @@ A full pass over the whole game: long automated runs (up to 150 years, every ori
 - **Safety:** ruler-only actions politely refuse if you don't rule, and a single failing action or decision can no longer break the game.
 - **Works offline:** every unit sprite, battle ground, the stress test and the example mod are now cached, so battles and ceremonies work without a connection.
 - Small text fixes.
+
+## 2.10: a faster clock
+
+- A month now passes every **30 seconds** (it was a minute). A year is 6 minutes, a long reign about 3 hours, and a newborn heir comes of age in about an hour and a half of play.
+- Everything speeds up with it: crossing a continent takes 2 to 3 minutes and an overseas voyage about 3, wars move twice as fast, and a matter for your attention arrives every minute or so.
 
