@@ -121,11 +121,19 @@ function loop(t) {
   const dt = Math.min(250, t - (lastFrame || t)); lastFrame = t;
   if (playing && !busy && world && world.playerId && tab !== 'battle' && !document.hidden && !$('#sheetWrap').dataset.locked) {
     acc += dt;
+    const step = world.walk(dt / MONTH_MS);
+    if (step === 'arrived') afterWalk();
     if (acc >= MONTH_MS) { acc -= MONTH_MS; monthPasses(); }
   }
   if (world) world._frac = Math.min(1, acc / MONTH_MS);
   updateHeader();
   requestAnimationFrame(loop);
+}
+// you reached the end of a road: say so right away, and deal with whatever waits there
+function afterWalk() {
+  const last = world.chronicle[world.chronicle.length - 1]; if (last && last.type === 'you') toast(last.text, 'you');
+  if (world.pendingBattle && !busy) { busy = true; resolvePending().then(() => { busy = false; }); }
+  render(tab === 'map'); save();
 }
 function monthPasses() {
   const from = world.chronicle.length;
@@ -447,7 +455,7 @@ function worldSheet() {
     <div class="sub">When a battle you'd watch begins, the world pauses and the battle map opens. Battles you skip are still fought on the same engine, just faster. Big battles involve a kingdom or over 3,000 troops.</div>
     <p class="note">Your world is saved on this device automatically.</p>
     <h2 class="sec">Credits</h2>
-    <div class="sub">The Dynasty v2.11. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
+    <div class="sub">The Dynasty v2.12. All pixel art is from the HAS (Heroic Fantasy) asset packs by Aleksandr Makarov (@IknowKingRabbit), used under its license. Thank you, Aleksandr.</div>
   `);
 }
 

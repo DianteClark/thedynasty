@@ -28,7 +28,7 @@ let cam = { x: 0, y: 0, z: 1, follow: true }, raf = 0, sel = null, cb = {}, dpr 
 // movers glide between where they were at the start of the month and where they are now
 function at(key, o) {
   const p = W._prev && W._prev.get(key); const f = W._frac || 0;
-  if (!p) return { x: o.x, y: o.y };
+  if (!p || key[0] === 'p') return { x: o.x, y: o.y }; // you move in real time, so you're always drawn where you are
   // follow the road actually taken this month (around coasts, through ports), not a straight line
   const tr = o.trail; if (tr && tr.length > 2 && Math.abs(tr[0].x - p[0]) < 0.01 && Math.abs(tr[0].y - p[1]) < 0.01) {
     let total = 0; for (let i = 1; i < tr.length; i++) total += Math.hypot(tr[i].x - tr[i - 1].x, tr[i].y - tr[i - 1].y);
@@ -421,7 +421,7 @@ function card() {
       <div class="sub">${s.destroyed ? 'Destroyed. Someone may rebuild it one day.' : `${cultureById(s.culture).race} ${s.biome} ${r && r.capital === s.id ? 'capital' : 'settlement'} · ${r ? (r.setts.size === 1 ? 'free village' : esc(r.name)) : ''}`}</div>
       ${s.destroyed ? '' : `<div class="kv"><div><b>${s.pop}</b><small>People</small></div><div><b>${Math.round(s.unrest)}</b><small>Unrest</small></div><div><b>${s.famine ? 'Famine' : Math.round(s.food)}</b><small>Food</small></div></div>
       <div class="wrow">${ruler ? `<button class="pill" data-wc="${ruler.id}">${esc(W.rulerTitle(r, ruler))} ${esc(ruler.name)}</button>` : ''}${r && W.knowsRealm(r) ? `<button class="pill" data-wr="${r.id}">Open ${esc(r.name)}</button>` : ''}<span class="tag">Guard: ${s.guard}</span>${s.port ? '<span class="tag">⚓ Port</span>' : ''}</div><div class="sub" style="margin-top:4px">${esc(W.landName(s))}${W.wildOf(s) ? ` · by ${esc(W.wildOf(s).name)}` : ''}</div>`}
-      ${youCanTravel() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${(n => n + ' month' + (n === 1 ? '' : 's'))(W.tripMonths(W.player, s))}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
+      ${youCanTravel() && s.id !== W.player.settId && !s.destroyed ? `<button class="abtn" style="margin-top:8px" data-wact='${JSON.stringify({ type: 'travel', to: s.id })}'>🧭 Travel here · ${W.tripLabel(W.player, s)}${W.landName(s) !== W.landName(W.player) ? ' by sea' : ''}</button>` : ''}`;
   } else if (sel.kind === 'march') {
     const m = sel.war.march; if (!m) { sel = null; return card(); }
     const att = W.realm(m.att), def = W.realm(m.def), tgt = W.sett(m.target);

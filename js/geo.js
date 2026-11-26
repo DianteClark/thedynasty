@@ -153,10 +153,9 @@ export function route(W, from, to) {
 }
 
 // Move an object one month along its route. Returns true on arrival.
-export function advance(W, obj, dest, landSpeed, seaSpeed) {
+export function advance(W, obj, dest, landSpeed, seaSpeed, budget = 1) {
   const key = Math.round(dest.x * 10) + ',' + Math.round(dest.y * 10);
   if (obj.pathKey !== key || !obj.path) { obj.path = route(W, obj, dest); obj.pathKey = key; }
-  let budget = 1;
   const trail = [{ x: obj.x, y: obj.y }];
   while (obj.path.length && budget > 1e-6) {
     const wp = obj.path[0]; const sp = wp.sea ? seaSpeed : landSpeed;
@@ -173,8 +172,9 @@ export function advance(W, obj, dest, landSpeed, seaSpeed) {
 }
 
 // Months a trip should take, following the real route.
-export function tripMonths(W, from, to, landSpeed, seaSpeed) {
+export function tripTime(W, from, to, landSpeed, seaSpeed) {
   let t = 0, p = { x: from.x, y: from.y };
   for (const wp of route(W, from, to)) { t += Math.hypot(wp.x - p.x, wp.y - p.y) / (wp.sea ? seaSpeed : landSpeed); p = wp; }
-  return Math.max(1, Math.ceil(t));
+  return t;
 }
+export function tripMonths(W, from, to, landSpeed, seaSpeed) { return Math.max(1, Math.ceil(tripTime(W, from, to, landSpeed, seaSpeed))); }

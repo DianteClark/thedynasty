@@ -2,7 +2,7 @@
 // Runs month by month. Everything that happens is written to the Chronicle.
 import { CULTURES, DYNASTY_PARTS, DYNASTY_SUFFIX, cultureById } from './names.js';
 import { Battle, UNITS, layoutBases, fieldFor, BASE_LAYOUTS, BASE_CAPS } from './battle.js';
-import { buildGeo, buildTerritory, landAt, advance, tripMonths, beastName } from './geo.js';
+import { buildGeo, buildTerritory, landAt, advance, tripMonths, tripTime, beastName } from './geo.js';
 import { installKnowledge } from './know.js';
 import { installCourt, COURT_ACTS, HANDLERS } from './court.js';
 import { installEvents, resolveEvent } from './events.js';
@@ -252,6 +252,11 @@ export class World {
     return L;
   }
   tripMonths(from, to) { return tripMonths(this, from, to, MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1), MOVE.sea); }
+  // how long a trip feels, in words (a month passes every minute of play)
+  tripLabel(from, to) {
+    const t = tripTime(this, from, to, MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1), MOVE.sea);
+    return t < 0.3 ? 'a few days' : t < 0.7 ? 'about two weeks' : t < 1.4 ? 'about a month' : `about ${Math.round(t)} months`;
+  }
   wildOf(p) { const id = this.wildId && this.wildId[Math.round(p.y) * this.w + Math.round(p.x)]; return id ? this.wilds[id - 1] : null; }
   lairName(L) { const M = MON[L.key]; const wd = L.wild && this.wilds[L.wild - 1]; return `${L.name ? `${L.name}, ${M.the}` : M.the}${wd ? ` of ${wd.name}` : ''}`; }
   landName(p) { const l = this.landId && landAt(this, p); return l ? this.lands[l - 1].name : ''; }
@@ -1683,21 +1688,17 @@ export class World {
     if (p.task && !p.prisonerOf) {
       const t = p.task; const dest = t.lair ? this.lairs.find(l => l.id === t.lair) : t.bandit ? this.char(t.bandit) : this.sett(t.to);
       if (!dest || (t.bandit && !dest.alive) || (t.lair && !dest.alive)) { p.task = null; this.you(`Your quarry is gone before you arrive.`, [], 1); }
+      else if (p.delayed > 0) { p.delayed--; } // held up on the road this month
       else {
-        const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
-        let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
-        if (p.delayed > 0) { p.delayed--; } // held up on the road this month
-        else if (!advance(this, p, dest, sp, MOVE.sea)) {
+        // whatever part of the month wasn't already walked in real time is walked now
+        const left = Math.max(0, 1 - (p._walked || 0));
+        if (left > 0 && this.walk(left) === 'moving') {
           const b = !p.atSea && this.living().find(x => x.role === 'bandit' && this.dist(x, p) < 3 && x.band > (p.followers || 0) * 0.5);
           if (b && !t.bandit && this.chance(0.06)) { p.task = null; this.you(`Bandits under ${this.fullName(b)} ambush you on the road!`, [b.id], 2); this.skirmish(b, true); }
-        } else {
-          p.x = dest.x; p.y = dest.y; p.task = null;
-          if (t.bandit) this.skirmish(dest, false);
-          else if (t.lair) this.huntResolve(dest, t.approach);
-          else { p.settId = dest.id; this.reveal(dest.x, dest.y, 10); this.learnLocals(dest); this.you(`You arrive at ${dest.name}.`, [], 1); }
         }
       }
     }
+    p._walked = 0;
     for (const x of this.living()) if (x.companionOf === p.id) { x.x = p.x; x.y = p.y; x.settId = p.settId; if (p.realmId && x.realmId !== p.realmId && p.role !== 'vagabond') { x.realmId = p.realmId; if (x.role === 'vagabond') this.addOfficer(this.realm(p.realmId), x); } }
     if (p.challenge && this.monthIndex >= p.challenge.due) { this.act_answer({ accept: false }); }
     if (this.month === 9) this.challengesForPlayer();
@@ -1705,6 +1706,26 @@ export class World {
     for (const x of this.living()) if (x.companionOf === p.id && this.chance(0.5)) this.opine(x, p, 1);
     // plots against you (most arrive as assassins on the map; a few strike from within)
     for (const plot of [...(this.plots || [])]) if (!plot.agentId && this.monthIndex >= plot.due) this.resolvePlayerPlot(plot);
+  }
+  // you travel in real time: the screen calls this every frame with the fraction of a month that passed
+  walk(frac) {
+    const p = this.player; if (!p || !p.alive || !p.task || p.prisonerOf || p.delayed > 0) return null;
+    const t = p.task; const dest = t.lair ? this.lairs.find(l => l.id === t.lair) : t.bandit ? this.char(t.bandit) : this.sett(t.to);
+    if (!dest || (t.bandit && !dest.alive) || (t.lair && !dest.alive)) return null;
+    frac = Math.min(frac, Math.max(0, 1 - (p._walked || 0))); if (frac <= 0) return 'moving';
+    p._walked = (p._walked || 0) + frac;
+    const g = this.grid[Math.round(p.y)]?.[Math.round(p.x)];
+    let sp = MOVE.land * 1.05 * (this.season === 'Winter' ? 0.75 : 1); if (g === 'swamp' || g === 'mountain') sp *= 0.6;
+    const bx = p.x, by = p.y;
+    const there = advance(this, p, dest, sp, MOVE.sea, frac);
+    if (this.known && Math.hypot(p.x - (p._seenX ?? bx), p.y - (p._seenY ?? by)) > 1) { this.reveal(p.x, p.y, p.atSea ? 7 : 6); p._seenX = p.x; p._seenY = p.y; }
+    for (const x of this.living()) if (x.companionOf === p.id) { x.x = p.x; x.y = p.y; }
+    if (!there) return 'moving';
+    p.x = dest.x; p.y = dest.y; p.task = null;
+    if (t.bandit) this.skirmish(dest, false);
+    else if (t.lair) this.huntResolve(dest, t.approach);
+    else { p.settId = dest.id; this.reveal(dest.x, dest.y, 10); this.learnLocals(dest); this.you(`You arrive at ${dest.name}.`, [], 1); }
+    return 'arrived';
   }
   resolvePlayerPlot(plot) {
     const p = this.player; if (!plot || !p) return;
@@ -1745,8 +1766,8 @@ export class World {
     const p = this.player, s = this.sett(a.to); if (!s || s.destroyed) return 'There is nothing there to travel to.';
     if (p.prisonerOf) return 'You are a prisoner.';
     p.task = { type: 'travel', to: s.id };
-    const months = this.tripMonths(p, s);
-    return `You set out for ${s.name}. About ${months} month${months === 1 ? '' : 's'} on the road${landAt(this, p) !== landAt(this, s) ? ', with a sea crossing' : ''}.`;
+    p._walked = 0;
+    return `You set out for ${s.name}: ${this.tripLabel(p, s)} on the road${landAt(this, p) !== landAt(this, s) ? ', with a sea crossing' : ''}.`;
   }
   contractsHere() {
     const p = this.player; if (!p) return [];

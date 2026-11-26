@@ -1,6 +1,6 @@
 # The Dynasty
 
-**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.11
+**▶ Play it: https://dianteclark.github.io/thedynasty/** · v2.12
 
 A living fantasy world sim with no fixed ending. Start as a vagabond, a village headman, a minor lord or an heir, on the first day of a young world or dropped into one that has already lived through 30 to 100 years of history, and try to build something that outlives you. Kingdoms, villages, bandits, mercenaries and monsters all play by the same rules you do, and the world writes everything into its Chronicle.
 
@@ -271,4 +271,10 @@ The 30-second month made everything faster, but it was only travel that dragged,
 - **Riders and ships** (you, envoys, spies, caravans) move about three times faster: the next village is about 10 seconds away, a crossing of a whole continent or an ocean about 2 minutes.
 - **Armies** move about one and a half times faster: still slower than a lone rider, as a host on the march should be.
 - **Smoother on the map:** travelers now glide along the road they actually take, around coasts and through ports, instead of cutting straight across the month.
+
+## 2.12: real-time travel
+
+- **You move in real time.** Before, your character only moved when a month ticked over: you'd set out and nothing happened for up to a minute, then the whole leg was done at once and "You arrive" popped up while the map was still catching up. Now you start moving the moment you set out, the map shows you where you really are every frame, and you arrive (and hear about it) the moment you get there.
+- Fog lifts as you go, and your companions travel with you.
+- **Trip times in words:** travel buttons and messages say "a few days", "about two weeks" or "about 3 months" instead of rounding every short trip up to a month.
 

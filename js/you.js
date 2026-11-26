@@ -108,7 +108,7 @@ function actions(w, p, r, rules) {
   if (p.role === 'vagabond') {
     const here = w.sett(p.settId);
     const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 5);
-    h += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Pick a destination here, or tap any settlement on the Map.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripMonths(p, s)} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`;
+    h += `<div class="card"><h3>🧭 Travel</h3><div class="sub">Pick a destination here, or tap any settlement on the Map.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripLabel(p, s)}`, { type: 'travel', to: s.id })).join('')}</div></div>`;
     const cons = w.contractsHere();
     h += `<div class="card"><h3>⚔ Contracts</h3>${cons.length ? cons.map(c => {
       if (c.kind === 'bandit') return `<div class="arow"><div><b>${esc(c.label)}</b><div class="sub">Reward ~${c.reward} gold · odds ${pct(c.odds)} · fought on the battle map</div></div>${btn('Hunt', { type: 'contract', kind: 'bandit', id: c.id })}</div>`;
@@ -202,7 +202,7 @@ export function renderCourt(view, w) {
     html += here
       ? `<div class="card hero-card"><h3>🏰 The hall of ${esc(cap.name)}</h3><div class="sub">You hold court. Your council brings you business each season, and what you order takes time to happen.</div>${leadToggle(r)}</div>`
       : `<div class="card away"><h3>🏰 Away from ${esc(cap ? cap.name : 'your seat')}</h3><div class="sub">${esc(w.awayReason())} Your steward ${w.steward(r) ? esc(w.steward(r).name) : '(none appointed: your realm drifts)'} rules in your place and settles court business after a month.</div>
-        ${!p.task && cap ? `<div class="abtns" style="margin-top:8px">${btn(`Return to ${esc(cap.name)} · ${w.tripMonths(p, cap)} mo`, { type: 'travel', to: cap.id })}</div>` : ''}${leadToggle(r)}</div>`;
+        ${!p.task && cap ? `<div class="abtns" style="margin-top:8px">${btn(`Return to ${esc(cap.name)} · ${w.tripLabel(p, cap)}`, { type: 'travel', to: cap.id })}</div>` : ''}${leadToggle(r)}</div>`;
     const court = all.filter(d => d.court);
     html += `<h2 class="sec">Court business</h2>` + (court.length ? court.map(d => decisionCard(w, d, here)).join('') : '<div class="sub" style="margin:0 2px 10px">Nothing waits on you. Your council will speak up as the seasons turn.</div>');
     const other = all.filter(d => !d.court);
@@ -212,7 +212,7 @@ export function renderCourt(view, w) {
   } else {
     if (all.length) html += `<h2 class="sec">Matters for you</h2>` + all.map(d => decisionCard(w, d, true)).join('');
     html += abroad(w, p) + mission(w, p) + actions(w, p, r, rules);
-    if (p.role === 'officer') { const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 4); html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">You may ride out between campaigns.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripMonths(p, s)} mo`, { type: 'travel', to: s.id })).join('')}</div></div>`; }
+    if (p.role === 'officer') { const near = w.setts.filter(s => !s.destroyed && s.id !== p.settId).sort((a, b) => w.dist(a, p) - w.dist(b, p)).slice(0, 4); html += `<div class="card"><h3>🧭 Travel</h3><div class="sub">You may ride out between campaigns.</div><div class="abtns">${near.map(s => btn(`${esc(s.name)} · ${w.tripLabel(p, s)}`, { type: 'travel', to: s.id })).join('')}</div></div>`; }
   }
   view.innerHTML = html;
 }
